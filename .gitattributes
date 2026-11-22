@@ -1,0 +1,5 @@
+* text=auto
+*.png binary
+*.tga binary
+*.exr binary
+*.blend binary

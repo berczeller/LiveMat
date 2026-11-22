@@ -1,0 +1,29 @@
+schema_version = "1.0.0"
+
+id = "livemat"
+version = "0.1.0"
+name = "LiveMat"
+tagline = "Build Blender materials from PBR texture folders"
+maintainer = "Tom Berczeller"
+type = "add-on"
+website = "https://github.com/berczeller/LiveMat"
+
+tags = ["Material", "Import-Export", "Node"]
+
+blender_version_min = "5.2.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+copyright = [
+  "2026 Tom Berczeller",
+]
+
+[permissions]
+files = "Read texture images from folders you pick"
+
+[build]
+paths_exclude_pattern = [
+  "__pycache__/",
+  "*.pyc",
+]
