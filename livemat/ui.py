@@ -236,15 +236,18 @@ def draw_slot(layout, material, slot, node, item, group_node):
     name.label(text=shown or (image.name if image is not None else "None"))
 
     if not slot.semantic("RGB"):
+        # One channel: the slot name already says what it holds. Packed maps
+        # name each channel so you know which dropdown routes which value.
+        single = len(slot.channels) == 1
         for channel, semantic in slot.channels:
             row = info.row(align=True)
-            row.label(text=SEMANTIC_NAMES[semantic])
+            row.label(text="Active Channel" if single else SEMANTIC_NAMES[semantic])
             if item is not None:
                 sub = row.row(align=True)
                 sub.ui_units_x = 2.2
-                sub.prop(item, f"src_{channel}", text="")
+                sub.prop(item, f"src_{channel}", text="", icon_only=True)
             else:
-                row.label(text=channel)
+                row.label(text="", icon_value=icons.get(f"channel_{channel.lower()}"))
 
     if group_node is None:
         return
@@ -255,9 +258,12 @@ def draw_slot(layout, material, slot, node, item, group_node):
             if socket is None or socket.is_linked:
                 continue
             if socket_name == nodegroup.BASE_TINT:
-                row = col.split(factor=0.34, align=True)
-                row.label(text=label)
-                row.prop(socket, "default_value", text="")
+                # Same column as the slot name, label above the color field.
+                row = col.split(factor=0.34)
+                row.column()
+                tint = row.column(align=True)
+                tint.label(text=label)
+                tint.prop(socket, "default_value", text="")
             else:
                 col.prop(socket, "default_value", text=label, slider=True)
     if slot.id == "detail_normal" and image is not None:

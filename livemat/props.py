@@ -13,22 +13,28 @@ from bpy.props import (
     StringProperty,
 )
 
-from . import actions, registry
+from . import actions, icons, registry
 from .core.scanner import TextureSet
 
-_CHANNELS = [
-    ("R", "R", "Read the red channel", 1),
-    ("G", "G", "Read the green channel", 2),
-    ("B", "B", "Read the blue channel", 3),
-    ("A", "A", "Read the alpha channel", 4),
-]
+_CHANNEL_NAMES = {"R": "red", "G": "green", "B": "blue", "A": "alpha"}
+# Kept alive between calls; Blender doesn't copy enum item strings.
+_channel_items = []
+
+
+def _channel_list(_self, _context):
+    """R, G, B and A with their color-coded chips. The numbers match what files already store."""
+    _channel_items[:] = [
+        (key, key, f"Read the {name} channel", icons.get(f"channel_{key.lower()}"), number)
+        for number, (key, name) in enumerate(_CHANNEL_NAMES.items(), start=1)
+    ]
+    return _channel_items
 
 
 def _channel(default):
     return EnumProperty(
         name="Channel",
-        items=_CHANNELS,
-        default=default,
+        items=_channel_list,
+        default="RGBA".index(default) + 1,  # dynamic enums take the item number
         description="Texture channel this value is read from",
         update=actions.channels_changed,
     )

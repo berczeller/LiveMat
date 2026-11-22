@@ -90,6 +90,81 @@ def render(shape, color):
     return b"".join(rows)
 
 
+def rounded_square(size, radius):
+    def dist(x, y):
+        qx = abs(x - size / 2) - (size / 2 - radius)
+        qy = abs(y - size / 2) - (size / 2 - radius)
+        outside = math.hypot(max(qx, 0.0), max(qy, 0.0))
+        return outside + min(max(qx, qy), 0.0) - radius
+
+    return dist
+
+
+def render_layers(layers):
+    """Draw (shape, color) layers back to front at icon scale, without fitting them."""
+    rows = []
+    n = SAMPLES
+    for py in range(SIZE):
+        row = bytearray([0])
+        for px in range(SIZE):
+            r = g = b = a = 0.0
+            for shape, color in layers:
+                cover = sum(
+                    1
+                    for sy in range(n)
+                    for sx in range(n)
+                    if shape(px + (sx + 0.5) / n, py + (sy + 0.5) / n) <= 0.0
+                ) / (n * n)
+                # "Over" compositing of this layer onto what's below.
+                r = color[0] * cover + r * (1 - cover)
+                g = color[1] * cover + g * (1 - cover)
+                b = color[2] * cover + b * (1 - cover)
+                a = cover + a * (1 - cover)
+            if a > 0:
+                r, g, b = r / a if a < 1 else r, g / a if a < 1 else g, b / a if a < 1 else b
+            row += bytes((round(min(r, 255)), round(min(g, 255)), round(min(b, 255)), round(255 * a)))
+        rows.append(bytes(row))
+    return b"".join(rows)
+
+
+WHITE = (0xFF, 0xFF, 0xFF)
+# Channel chips: a colored square with the channel's letter.
+CHANNEL_COLORS = {
+    "r": (0xE0, 0x4F, 0x5F),
+    "g": (0x3F, 0xAE, 0x6A),
+    "b": (0x3D, 0x7F, 0xE0),
+    "a": (0x80, 0x80, 0x88),
+}
+
+
+def _arc(cx, cy, r, start, end, steps=20):
+    return [
+        (cx + r * math.cos(math.radians(start + (end - start) * i / steps)),
+         cy - r * math.sin(math.radians(start + (end - start) * i / steps)))
+        for i in range(steps + 1)
+    ]
+
+
+LETTERS = {
+    "r": union(
+        polyline([(11, 24), (11, 8), (17.5, 8)] + _arc(17.5, 12.25, 4.25, 90, -90)[1:] + [(11, 16.5)], 3.0),
+        polyline([(16, 16.5), (21.5, 24)], 3.0),
+    ),
+    "g": union(
+        polyline(_arc(16, 16, 8, 40, 320), 3.0),
+        polyline([(22.1, 21.1), (22.1, 16.5), (17, 16.5)], 3.0),
+    ),
+    "b": union(
+        polyline([(11, 24), (11, 8), (17, 8)] + _arc(17, 11.75, 3.75, 90, -90)[1:] + [(11, 15.5)], 3.0),
+        polyline([(17, 15.5)] + _arc(17.5, 19.75, 4.25, 90, -90)[1:] + [(11, 24)], 3.0),
+    ),
+    "a": union(
+        polyline([(9, 24.5), (16, 7.5), (23, 24.5)], 3.0),
+        polyline([(12, 19), (20, 19)], 2.8),
+    ),
+}
+
+
 def write_png(path, raw):
     def chunk(kind, data):
         body = kind + data
@@ -139,6 +214,10 @@ def main():
     for name, color, shape in icons():
         write_png(OUT / f"{name}.png", render(shape, color))
         print("wrote", OUT / f"{name}.png")
+    for key, color in CHANNEL_COLORS.items():
+        layers = [(rounded_square(SIZE, 6.0), color), (LETTERS[key], WHITE)]
+        write_png(OUT / f"channel_{key}.png", render_layers(layers))
+        print("wrote", OUT / f"channel_{key}.png")
 
 
 if __name__ == "__main__":

@@ -7,7 +7,19 @@ import pathlib
 
 import bpy.utils.previews
 
-NAMES = ("livemat", "source", "sets", "textures", "surface", "normals", "detail")
+NAMES = (
+    "livemat",
+    "source",
+    "sets",
+    "textures",
+    "surface",
+    "normals",
+    "detail",
+    "channel_r",
+    "channel_g",
+    "channel_b",
+    "channel_a",
+)
 _DIR = pathlib.Path(__file__).parent / "icons"
 _previews = None
 

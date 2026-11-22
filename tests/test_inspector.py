@@ -78,6 +78,7 @@ class SurfaceInputsTest(OperatorTestBase):
 
     def test_channel_reroute(self):
         state = next(s for s in self.material.livemat.slots if s.slot == "mg")
+        self.assertEqual((state.src_R, state.src_A), ("R", "A"))  # each channel reads itself by default
         state.src_R = "G"
         metallic = group_inputs(self.material)["Metallic Gloss"]
         self.assertEqual(metallic.links[0].from_node.bl_idname, "ShaderNodeCombineColor")
