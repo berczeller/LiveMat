@@ -1,15 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 Tom Berczeller
 
-import os
+"""LiveMat panels. One set of draw functions feeds the 3D Viewport sidebar,
+the Shader Editor sidebar and Material Properties."""
 
 import bpy
-import bpy.utils.previews
 
-from . import registry
-from .operators import plural
+from . import icons, registry, thumbs
 from .build import material as builder
 from .build import nodegroup
+from .operators import plural
 
 SEMANTIC_NAMES = {
     "base_color": "Base Color",
@@ -17,35 +17,58 @@ SEMANTIC_NAMES = {
     "specular": "Specular",
     "emission": "Emission",
     "normal": "Normal",
+    "detail_normal": "Detail Normal",
     "metallic": "Metallic",
     "roughness": "Roughness",
-    "gloss": "Gloss",
-    "ao": "AO",
+    "gloss": "Smoothness",
+    "ao": "Occlusion",
     "alpha": "Alpha",
     "height": "Height",
 }
 
-# Thumbnails for files that aren't loaded as images yet (scan results).
-_file_previews = None
+# Sliders shown under the slot that holds each semantic, like Unity's inspector.
+SLOT_PARAMETERS = {
+    "base_color": ((nodegroup.BASE_TINT, "Tint"),),
+    "diffuse": ((nodegroup.BASE_TINT, "Tint"),),
+    "metallic": ((nodegroup.METALLIC_STRENGTH, "Metallic"),),
+    "gloss": ((nodegroup.SMOOTHNESS_STRENGTH, "Smoothness"),),
+    "normal": ((nodegroup.NORMAL_STRENGTH, "Strength"),),
+    "detail_normal": ((nodegroup.DETAIL_STRENGTH, "Strength"),),
+    "ao": ((nodegroup.AO_STRENGTH, "Strength"),),
+    "height": ((nodegroup.HEIGHT_STRENGTH, "Strength"),),
+    "emission": ((nodegroup.EMISSION_STRENGTH, "Intensity"),),
+}
+
+TITLE_GAP = 0.6  # separator factor around section titles and box edges
+SECTION_END_GAP = 0.6  # separator factor under each section's last row
+THUMB_SCALE = 3.4  # slot thumbnail size, in UI units
+PICKER_SCALE = 6.0  # thumbnail size inside the picker grid
 
 
-def channel_summary(slot):
-    """'R Metallic  A Gloss' for packed slots, 'Base Color' for plain ones."""
-    if slot.semantic("RGB"):
-        return SEMANTIC_NAMES[slot.semantic("RGB")]
-    return "  ".join(f"{channel} {SEMANTIC_NAMES[semantic]}" for channel, semantic in slot.channels)
+def section(layout, title, icon):
+    """A box with a colored icon and title. Returns the column to draw into."""
+    box = layout.box()
+    box.separator(factor=TITLE_GAP)
+    row = box.row(align=True)
+    row.separator(factor=TITLE_GAP)  # keep the icon off the box edge
+    row.label(text=title, icon_value=icons.get(icon))
+    inner = box.row()
+    inner.separator(factor=TITLE_GAP)
+    body = inner.column()
+    inner.separator(factor=TITLE_GAP)
+    return body
 
 
-def file_icon(path):
-    if _file_previews is None or not path or not os.path.isfile(path):
-        return 0
-    preview = _file_previews.get(path) or _file_previews.load(path, path, "IMAGE")
-    return preview.icon_id
+def end_section(body):
+    body.separator(factor=SECTION_END_GAP)
 
 
-def builtin_icon(name):
-    """The numeric id of a built-in icon, for calls that only take icon_value."""
-    return bpy.types.UILayout.bl_rna.functions["prop"].parameters["icon"].enum_items[name].value
+def main_button(layout):
+    """A row for the section's main action, in the theme's accent color like Blender's dialogs."""
+    row = layout.row(align=True)
+    row.scale_y = 1.4
+    row.active_default = True
+    return row
 
 
 def active_material(context):
@@ -55,8 +78,97 @@ def active_material(context):
     return material
 
 
+# Source and texture sets
+
+
+def draw_source(layout, props):
+    body = section(layout, "Source", "source")
+    col = body.column(align=True)
+    col.prop(props, "folder", text="")
+    row = col.row(align=True)
+    # Red until a preset is picked, so the empty choice can't be missed.
+    row.alert = props.preset == registry.NONE
+    row.prop(props, "preset", text="")
+
+    body.separator(factor=0.5)
+    main_button(body).operator("livemat.scan", icon="VIEWZOOM")
+
+    row = body.row(align=True)
+    row.prop(props, "recursive", text="Subfolders", toggle=True, icon="FILE_FOLDER")
+    row.prop(props, "create_missing", text="Create", toggle=True, icon="ADD")
+    row.prop(props, "rebuild", text="Rebuild", toggle=True, icon="TRASH")
+    row = body.row(align=True)
+    row.operator("livemat.refresh", icon="FILE_REFRESH")
+    row.prop(props, "auto_reload", text="Auto", toggle=True, icon="TIME")
+    row.operator(
+        "livemat.authoring_view",
+        text="Neutral View",
+        icon="HIDE_OFF",
+        depress=props.authoring_view,
+    )
+    end_section(body)
+
+
+def draw_sets(layout, props):
+    if not props.sets:
+        if props.scanned_folder:
+            body = section(layout, "Texture Sets", "sets")
+            body.label(text="No texture sets found", icon="INFO")
+            end_section(body)
+        return
+
+    body = section(layout, "Texture Sets", "sets")
+    body.template_list("LIVEMAT_UL_sets", "", props, "sets", props, "active_set", rows=4)
+    if props.scanned_preset != props.preset:
+        body.label(text="Preset changed, scan again", icon="ERROR")
+    if props.ignored or props.unmatched:
+        info = body.row()
+        info.enabled = False
+        info.label(text=f"{props.unmatched} unrecognized, {props.ignored} ignored files")
+
+    if 0 <= props.active_set < len(props.sets):
+        draw_set(body, props, props.active_set)
+
+    body.separator(factor=0.5)
+    count = sum(1 for item in props.sets if item.include)
+    main_button(body).operator("livemat.build", text=f"Build {plural(count, 'Material')}", icon="MATERIAL")
+    end_section(body)
+
+
+def draw_set(layout, props, index):
+    item = props.sets[index]
+    preset = registry.get(props.scanned_preset)
+    col = layout.column()
+    col.prop(item, "material", text="")
+    built_with = registry.get(item.material.get("livemat_preset", "")) if item.material else None
+    if built_with is not None:
+        # Its textures show in the Material panel; repeating them here is noise.
+        info = col.row()
+        info.enabled = False
+        info.label(text=f"Built with {built_with.name}", icon="CHECKMARK")
+    elif preset is not None:
+        # Not built yet: a preview of what the build will load.
+        files = {entry.slot: entry.path for entry in item.files}
+        grid = col.grid_flow(row_major=True, columns=4, even_columns=True, align=True)
+        for slot in preset.slots:
+            if slot.id in files:
+                cell = grid.column(align=True)
+                cell.template_icon(icon_value=thumbs.file_icon(files[slot.id]), scale=2.4)
+                label = cell.row()
+                label.alignment = "CENTER"
+                label.label(text=slot.label)
+    if item.duplicates:
+        col.label(text=f"Skipped {plural(item.duplicates, 'duplicate file')}", icon="INFO")
+    row = col.row(align=True)
+    row.operator("livemat.build", text="Build", icon="MATERIAL").index = index
+    row.operator("livemat.assign", text="Assign to Selected", icon="RESTRICT_SELECT_OFF").index = index
+
+
+# Material inspector
+
+
 def draw_material(layout, material):
-    """The material inspector: preset, one row per slot with a thumbnail, then parameters."""
+    """The material inspector: preset, one card per slot, then normal settings."""
     if material is None:
         layout.label(text="No active material", icon="INFO")
         return
@@ -66,41 +178,94 @@ def draw_material(layout, material):
         return
 
     row = layout.row(align=True)
-    row.context_pointer_set("material", material)
-    row.menu("LIVEMAT_MT_switch_preset", text=preset.name, icon="PRESET")
+    row.label(text=material.name, icon="MATERIAL")
+    sub = row.row(align=True)
+    sub.context_pointer_set("material", material)
+    sub.menu("LIVEMAT_MT_switch_preset", text=preset.name, icon="PRESET")
 
+    state = getattr(material, "livemat", None)
+    items = {item.slot: item for item in state.slots} if state else {}
     nodes = builder.livemat_texture_nodes(material)
-    for slot in preset.slots:
-        node = nodes.get(slot.id)
-        image = node.image if node is not None else None
-        box = layout.box()
-        split = box.split(factor=0.28)
-        thumb = split.column()
-        icon = layout.icon(image) if image is not None else builtin_icon("IMAGE_DATA")
-        thumb.template_icon(icon_value=icon, scale=3.0)
-
-        info = split.column(align=True)
-        info.label(text=slot.label)
-        summary = channel_summary(slot)
-        if summary != slot.label:
-            sub = info.row()
-            sub.enabled = False
-            sub.label(text=summary)
-        row = info.row(align=True)
-        row.label(text=image.name if image else "None", icon="FILE_IMAGE" if image else "BLANK1")
-        op = row.operator("livemat.load_slot", text="", icon="FILEBROWSER")
-        op.material, op.slot = material.name, slot.id
-        if image is not None:
-            op = row.operator("livemat.clear_slot", text="", icon="X")
-            op.material, op.slot = material.name, slot.id
-
     group_node = builder.livemat_group_node(material)
-    if group_node is not None:
-        col = layout.column(align=True)
-        for name, *_rest in nodegroup.PARAMETERS:
-            socket = group_node.inputs.get(name)
-            if socket is not None and not socket.is_linked:
-                col.prop(socket, "default_value", text=name)
+
+    body = section(layout, "Textures", "textures")
+    for index, slot in enumerate(preset.slots):
+        if index:
+            body.separator(factor=0.8)
+        draw_slot(body, material, slot, nodes.get(slot.id), items.get(slot.id), group_node)
+    if not items:
+        hint = body.row()
+        hint.enabled = False
+        hint.label(text="Press Refresh to enable the texture picker", icon="INFO")
+    end_section(body)
+
+    if state is not None:
+        body = section(layout, "Normals", "normals")
+        body.row().prop(state, "tangents", expand=True)
+        if state.tangents == "UNITY":
+            hint = body.row()
+            hint.enabled = False
+            hint.label(text="Press Refresh after editing the meshes", icon="INFO")
+        end_section(body)
+
+
+def draw_slot(layout, material, slot, node, item, group_node):
+    image = node.image if node is not None else None
+    split = layout.split(factor=0.34)
+
+    thumb = split.column()
+    if item is not None:
+        # Click the thumbnail to pick a texture, like Unity's object picker.
+        thumb.template_icon_view(item, "texture", show_labels=True, scale=THUMB_SCALE, scale_popup=PICKER_SCALE)
+    else:
+        thumb.template_icon(icon_value=layout.icon(image) if image is not None else 0, scale=THUMB_SCALE)
+
+    info = split.column(align=True)
+    row = info.row(align=True)
+    row.label(text=slot.label)
+    op = row.operator("livemat.load_slot", text="", icon="FILEBROWSER", emboss=False)
+    op.material, op.slot = material.name, slot.id
+    if image is not None:
+        op = row.operator("livemat.clear_slot", text="", icon="X", emboss=False)
+        op.material, op.slot = material.name, slot.id
+
+    name = info.row()
+    name.enabled = False
+    # The file name, not the datablock name (which can carry a .001 suffix).
+    shown = bpy.path.basename(image.filepath) if image is not None and image.filepath else None
+    name.label(text=shown or (image.name if image is not None else "None"))
+
+    if not slot.semantic("RGB"):
+        for channel, semantic in slot.channels:
+            row = info.row(align=True)
+            row.label(text=SEMANTIC_NAMES[semantic])
+            if item is not None:
+                sub = row.row(align=True)
+                sub.ui_units_x = 2.2
+                sub.prop(item, f"src_{channel}", text="")
+            else:
+                row.label(text=channel)
+
+    if group_node is None:
+        return
+    col = layout.column(align=True)
+    for semantic in slot.semantics:
+        for socket_name, label in SLOT_PARAMETERS.get(semantic, ()):
+            socket = group_node.inputs.get(socket_name)
+            if socket is None or socket.is_linked:
+                continue
+            if socket_name == nodegroup.BASE_TINT:
+                row = col.split(factor=0.34, align=True)
+                row.label(text=label)
+                row.prop(socket, "default_value", text="")
+            else:
+                col.prop(socket, "default_value", text=label, slider=True)
+    if slot.id == "detail_normal" and image is not None:
+        mapping = builder.detail_mapping(material)
+        if mapping is not None:
+            row = col.row(align=True)
+            row.prop(mapping.inputs["Scale"], "default_value", index=0, text="Tiling X")
+            row.prop(mapping.inputs["Scale"], "default_value", index=1, text="Y")
 
 
 class LIVEMAT_MT_switch_preset(bpy.types.Menu):
@@ -111,7 +276,7 @@ class LIVEMAT_MT_switch_preset(bpy.types.Menu):
         if material is None:
             return
         current = material.get("livemat_preset")
-        for preset in registry.all_presets().values():
+        for preset in registry.sorted_presets():
             op = self.layout.operator(
                 "livemat.switch_preset",
                 text=preset.name,
@@ -134,6 +299,9 @@ class LIVEMAT_UL_sets(bpy.types.UIList):
             sub.label(text="New", icon="ADD")
 
 
+# Panels
+
+
 class _Sidebar:
     bl_region_type = "UI"
     bl_category = "LiveMat"
@@ -142,107 +310,37 @@ class _Sidebar:
 class _MainPanel(_Sidebar):
     bl_label = "LiveMat"
 
-    def draw(self, context):
-        layout = self.layout
-        props = context.scene.livemat
-
-        col = layout.column(align=True)
-        col.prop(props, "folder", text="")
-        col.prop(props, "preset", text="")
-        row = layout.row(align=True)
-        row.scale_y = 1.3
-        row.operator("livemat.scan", icon="VIEWZOOM")
-        row = layout.row(align=True)
-        row.operator("livemat.refresh", icon="FILE_REFRESH")
-        row.prop(props, "auto_reload", toggle=True, icon="TIME")
-
-        if not props.sets:
-            if props.scanned_folder:
-                layout.label(text="No texture sets found", icon="INFO")
-            return
-
-        layout.template_list("LIVEMAT_UL_sets", "", props, "sets", props, "active_set", rows=4)
-        if props.scanned_preset != props.preset:
-            layout.label(text="Preset changed, scan again", icon="ERROR")
-        if props.ignored or props.unmatched:
-            info = layout.row()
-            info.enabled = False
-            info.label(text=f"{props.unmatched} unrecognized, {props.ignored} ignored files")
-
-        if 0 <= props.active_set < len(props.sets):
-            self.draw_set(layout, props, props.active_set)
-
-        row = layout.row(align=True)
-        row.scale_y = 1.3
-        count = sum(1 for item in props.sets if item.include)
-        row.operator("livemat.build", text=f"Build {plural(count, 'Material')}", icon="MATERIAL")
-
-    @staticmethod
-    def draw_set(layout, props, index):
-        item = props.sets[index]
-        preset = registry.get(props.scanned_preset)
-        box = layout.box()
-        box.prop(item, "material", text="")
-        col = box.column(align=True)
-        files = {entry.slot: entry for entry in item.files}
-        for slot in preset.slots if preset else ():
-            entry = files.get(slot.id)
-            row = col.row()
-            if entry is None:
-                row.enabled = False
-                row.label(text=f"{slot.label}: none", icon="BLANK1")
-            else:
-                name = os.path.basename(entry.path)
-                row.label(text=f"{slot.label}: {name}", icon_value=file_icon(entry.path))
-        if item.duplicates:
-            box.label(text=f"Skipped {plural(item.duplicates, 'duplicate file')}", icon="INFO")
-        row = box.row(align=True)
-        row.operator("livemat.build", text="Build", icon="MATERIAL").index = index
-        row.operator("livemat.assign", text="Assign to Selected", icon="RESTRICT_SELECT_OFF").index = index
-
-
-class _OptionsPanel(_Sidebar):
-    bl_label = "Options"
-    bl_options = {"DEFAULT_CLOSED"}
+    def draw_header(self, _context):
+        self.layout.label(icon_value=icons.get("livemat"))
 
     def draw(self, context):
-        layout = self.layout
         props = context.scene.livemat
-        col = layout.column()
-        col.prop(props, "recursive")
-        col.prop(props, "create_missing")
-        col.prop(props, "rebuild")
-        layout.operator(
-            "livemat.authoring_view",
-            text="Restore View" if props.authoring_view else "Match Authoring View",
-            icon="RESTRICT_VIEW_OFF",
-            depress=props.authoring_view,
-        )
+        draw_source(self.layout, props)
+        draw_sets(self.layout, props)
 
 
 class _MaterialPanel(_Sidebar):
     bl_label = "Material"
+
+    def draw_header(self, _context):
+        self.layout.label(icon="MATERIAL")
 
     def draw(self, context):
         draw_material(self.layout, active_material(context))
 
 
 def _sidebar_panels(space, prefix, poll=None):
-    """The same three sidebar panels for one editor."""
+    """The main panel and its Material child for one editor."""
     main = type(f"LIVEMAT_PT_{prefix}", (_MainPanel, bpy.types.Panel), {"bl_space_type": space})
-    children = []
-    for name, base in (("material", _MaterialPanel), ("options", _OptionsPanel)):
-        children.append(
-            type(
-                f"LIVEMAT_PT_{prefix}_{name}",
-                (base, bpy.types.Panel),
-                {"bl_space_type": space, "bl_parent_id": main.__name__},
-            )
-        )
+    child = type(
+        f"LIVEMAT_PT_{prefix}_material",
+        (_MaterialPanel, bpy.types.Panel),
+        {"bl_space_type": space, "bl_parent_id": main.__name__},
+    )
     if poll is not None:
-        for cls in (main, *children):
+        for cls in (main, child):
             cls.poll = classmethod(poll)
-    return (main, *children)
+    return (main, child)
 
 
 def _is_shader_editor(_cls, context):
@@ -260,29 +358,19 @@ class LIVEMAT_PT_material(bpy.types.Panel):
     def poll(cls, context):
         return getattr(context, "material", None) is not None
 
+    def draw_header(self, _context):
+        self.layout.label(icon_value=icons.get("livemat"))
+
     def draw(self, context):
         draw_material(self.layout, context.material)
 
 
-_classes = (
-    LIVEMAT_MT_switch_preset,
-    LIVEMAT_UL_sets,
-    *_sidebar_panels("VIEW_3D", "view3d"),
-    *_sidebar_panels("NODE_EDITOR", "shader_editor", _is_shader_editor),
-    LIVEMAT_PT_material,
+register, unregister = bpy.utils.register_classes_factory(
+    (
+        LIVEMAT_MT_switch_preset,
+        LIVEMAT_UL_sets,
+        *_sidebar_panels("VIEW_3D", "view3d"),
+        *_sidebar_panels("NODE_EDITOR", "shader_editor", _is_shader_editor),
+        LIVEMAT_PT_material,
+    )
 )
-
-_register_classes, _unregister_classes = bpy.utils.register_classes_factory(_classes)
-
-
-def register():
-    global _file_previews
-    _file_previews = bpy.utils.previews.new()
-    _register_classes()
-
-
-def unregister():
-    global _file_previews
-    _unregister_classes()
-    bpy.utils.previews.remove(_file_previews)
-    _file_previews = None

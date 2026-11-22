@@ -7,13 +7,23 @@ import os
 import bpy
 from bpy.props import EnumProperty, IntProperty, StringProperty
 
-from . import refresh, registry
+from . import actions, refresh, registry, thumbs
 from .build import material as builder
+from .build import tangents
 from .core import naming, scanner
 
 # Tried in order by Match Authoring View: a neutral tone map, then plain sRGB.
 AUTHORING_TRANSFORMS = ("Khronos PBR Neutral", "Standard")
 _SAVED_VIEW_KEYS = ("view_transform", "look", "exposure", "gamma", "use_curve_mapping")
+
+
+def _viewport_shadings(context):
+    """3D Viewport shading settings in this window, keyed by area index."""
+    found = {}
+    for index, area in enumerate(context.window.screen.areas if context.window else ()):
+        if area.type == "VIEW_3D":
+            found[str(index)] = area.spaces.active.shading
+    return found
 
 
 def plural(count, word):
@@ -96,14 +106,12 @@ def build_item(props, item, *, create):
         material, item.texture_set(), preset, rebuild=props.rebuild, folder=props.scanned_folder
     )
     material["livemat_recursive"] = props.recursive
+    if material.livemat.tangents == "UNITY":
+        tangents.update_users(material)
     return material
 
 
-def _livemat_material(name):
-    material = bpy.data.materials.get(name)
-    if material is None or material.library is not None or not material.get("livemat_preset"):
-        return None, None
-    return material, registry.get(material["livemat_preset"])
+_livemat_material = actions.livemat_material
 
 
 class LIVEMAT_OT_scan(bpy.types.Operator):
@@ -228,19 +236,11 @@ class LIVEMAT_OT_load_slot(bpy.types.Operator):
         if not os.path.isfile(path):
             self.report({"ERROR"}, "Pick an image file")
             return {"CANCELLED"}
-        texture_set = builder.texture_set_from_material(material)
-        texture_set.files[self.slot] = path
-        parsed = naming.parse_filename(os.path.basename(path))
-        if parsed is not None and parsed.udim is not None:
-            texture_set.udim_slots.add(self.slot)
-        else:
-            texture_set.udim_slots.discard(self.slot)
         try:
-            builder.build_material(material, texture_set, preset, folder=builder.material_folder(material))
+            actions.assign_file(material, preset, self.slot, path)
         except (RuntimeError, TypeError) as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
-        refresh.set_cleared(material, refresh.cleared_slots(material) - {self.slot})
         return {"FINISHED"}
 
 
@@ -257,16 +257,11 @@ class LIVEMAT_OT_clear_slot(bpy.types.Operator):
         material, preset = _livemat_material(self.material)
         if material is None or preset is None:
             return {"CANCELLED"}
-        node = builder.livemat_texture_nodes(material).get(self.slot)
-        if node is not None:  # removed outright, or a generated image would be kept
-            material.node_tree.nodes.remove(node)
-        texture_set = builder.texture_set_from_material(material)
         try:
-            builder.build_material(material, texture_set, preset, folder=builder.material_folder(material))
+            actions.assign_file(material, preset, self.slot, None)
         except (RuntimeError, TypeError) as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
-        refresh.set_cleared(material, refresh.cleared_slots(material) | {self.slot})
         return {"FINISHED"}
 
 
@@ -296,7 +291,7 @@ class LIVEMAT_OT_switch_preset(bpy.types.Operator):
             return {"CANCELLED"}
         refresh.set_cleared(material, ())
         try:
-            builder.build_material(material, texture_set, preset, folder=folder)
+            actions.rebuild(material, preset, texture_set)
         except (RuntimeError, TypeError) as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
@@ -317,7 +312,8 @@ class LIVEMAT_OT_refresh(bpy.types.Operator):
         if not materials:
             self.report({"INFO"}, "No LiveMat materials in this file")
             return {"CANCELLED"}
-        updated, missing = 0, 0
+        actions.forget_folders()
+        updated, missing, no_tangents = 0, 0, set()
         for material in materials:
             try:
                 rebuilt, gone = refresh.update_material(material)
@@ -326,8 +322,15 @@ class LIVEMAT_OT_refresh(bpy.types.Operator):
                 continue
             updated += rebuilt
             missing += len(gone)
-        reloaded = refresh.reload_images(refresh.livemat_images(materials))
+            if material.livemat.tangents == "UNITY":
+                # Meshes may have been edited since their bitangents were written.
+                no_tangents.update(tangents.update_users(material))
+        images = refresh.livemat_images(materials)
+        reloaded = refresh.reload_images(images)
+        thumbs.forget(bpy.path.abspath(i.filepath) for i in images)
         refresh.redraw_all()
+        for name in sorted(no_tangents):
+            self.report({"WARNING"}, f"{name} has no UVs or uses n-gons, so it keeps Blender tangents")
         message = f"Reloaded {plural(reloaded, 'texture')}"
         if updated:
             message += f", updated {plural(updated, 'material')}"
@@ -342,8 +345,8 @@ class LIVEMAT_OT_authoring_view(bpy.types.Operator):
     bl_idname = "livemat.authoring_view"
     bl_label = "Match Authoring View"
     bl_description = (
-        "Use a neutral view transform with no look or exposure, closer to how Substance Painter "
-        "displays textures. Click again to restore your settings"
+        "Use a neutral view transform with no look or exposure, and keep the preview lighting "
+        "fixed in the world like a game engine. Click again to restore your settings"
     )
     bl_options = {"REGISTER", "UNDO"}
 
@@ -358,11 +361,21 @@ class LIVEMAT_OT_authoring_view(bpy.types.Operator):
                         setattr(view, key, saved[key])
                     except (TypeError, ValueError):
                         pass  # the config no longer has that transform or look
+            shadings = _viewport_shadings(context)
+            for index, value in saved.get("world_space_lighting", {}).items():
+                if index in shadings:
+                    shadings[index].use_world_space_lighting = value
             props.authoring_view = False
             self.report({"INFO"}, "View settings restored")
             return {"FINISHED"}
 
-        props.saved_view = json.dumps({key: getattr(view, key) for key in _SAVED_VIEW_KEYS})
+        shadings = _viewport_shadings(context)
+        saved = {key: getattr(view, key) for key in _SAVED_VIEW_KEYS}
+        saved["world_space_lighting"] = {i: s.use_world_space_lighting for i, s in shadings.items()}
+        props.saved_view = json.dumps(saved)
+        # Engines light the world, not the camera: keep the preview HDRI still while orbiting.
+        for shading in shadings.values():
+            shading.use_world_space_lighting = True
         for name in AUTHORING_TRANSFORMS:
             try:
                 view.view_transform = name

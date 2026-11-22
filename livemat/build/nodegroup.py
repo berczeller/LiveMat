@@ -14,23 +14,41 @@ import bpy
 from ..core.presets import SEMANTIC_DEFAULTS
 
 # Bump this when the generated node layout changes, so existing groups rebuild.
-BUILDER_VERSION = 3
+BUILDER_VERSION = 4
 
 GROUP_PREFIX = "LiveMat "
 SHADER_OUTPUT = "BSDF"
 
+BASE_TINT = "Base Color Tint"
 AO_STRENGTH = "AO Strength"
+METALLIC_STRENGTH = "Metallic Strength"
+SMOOTHNESS_STRENGTH = "Smoothness Strength"
 NORMAL_STRENGTH = "Normal Strength"
+DETAIL_STRENGTH = "Detail Normal Strength"
 HEIGHT_STRENGTH = "Height Strength"
 EMISSION_STRENGTH = "Emission Strength"
+UNITY_TANGENTS = "Unity Tangents"
+
+# Per-corner bitangents written to meshes for Unity-style normal mapping.
+# The leading dot hides the attribute in Blender's lists, and FBX doesn't export it.
+BITANGENT_ATTRIBUTE = ".livemat_bitangent"
 
 # name, default, min, max, semantic that makes the parameter useful
 PARAMETERS = (
     (AO_STRENGTH, 0.0, 0.0, 1.0, "ao"),
+    (METALLIC_STRENGTH, 1.0, 0.0, 1.0, "metallic"),
+    (SMOOTHNESS_STRENGTH, 1.0, 0.0, 1.0, "gloss"),
     (NORMAL_STRENGTH, 1.0, 0.0, 10.0, "normal"),
+    (DETAIL_STRENGTH, 1.0, 0.0, 2.0, "detail_normal"),
     (HEIGHT_STRENGTH, 0.0, 0.0, 10.0, "height"),
     (EMISSION_STRENGTH, 1.0, 0.0, 100.0, "emission"),
+    (UNITY_TANGENTS, 0.0, 0.0, 1.0, "normal"),
 )
+# Unity's albedo tint (_Color) is white by default.
+TINT_SEMANTICS = ("base_color", "diffuse")
+
+# Inputs whose values survive a rebuild of the group or a preset switch.
+PARAMETER_NAMES = frozenset([BASE_TINT] + [p[0] for p in PARAMETERS])
 
 SPECGLOSS_NAME = "LiveMat Spec-Gloss to Metal-Rough"
 SPECGLOSS_VERSION = 1
@@ -41,15 +59,20 @@ def alpha_socket_name(slot):
     return f"{slot.label} Alpha"
 
 
+def stamp(preset):
+    """What a group built for `preset` by this version of LiveMat is tagged with."""
+    return f"{preset.fingerprint}:{BUILDER_VERSION}"
+
+
 def ensure_group(preset):
     """Return the preset's node group, building or rebuilding it when it's missing or outdated."""
-    stamp = f"{preset.fingerprint}:{BUILDER_VERSION}"
+    expected = stamp(preset)
     group = find_group(preset.id)
-    if group is not None and group.get("livemat_stamp") == stamp:
+    if group is not None and group.get("livemat_stamp") == expected:
         return group
     group = _fresh_group(group, GROUP_PREFIX + preset.name, lambda g: _build(g, preset))
     group["livemat_preset"] = preset.id
-    group["livemat_stamp"] = stamp
+    group["livemat_stamp"] = expected
     return group
 
 
@@ -94,14 +117,14 @@ def _fresh_group(group, name, build):
     group.nodes.clear()
     group.interface.clear()
     build(group)
-    _restore_users(users)
+    _restore_users(group, users)
     return group
 
 
 def _save_users(group):
     trees = [m.node_tree for m in bpy.data.materials if m.library is None and m.node_tree is not None]
     trees += [g for g in bpy.data.node_groups if g.library is None and g != group]
-    parameters = {name for name, *_rest in PARAMETERS}
+    parameters = PARAMETER_NAMES
     users = []
     for tree in trees:
         for node in tree.nodes:
@@ -118,7 +141,7 @@ def _save_users(group):
                 if l.from_node == node
             ]
             values = {
-                s.name: s.default_value
+                s.name: tuple(s.default_value) if hasattr(s.default_value, "__len__") else s.default_value
                 for s in node.inputs
                 if s.name in parameters and not s.is_linked
             }
@@ -126,11 +149,21 @@ def _save_users(group):
     return users
 
 
-def _restore_users(users):
+def _restore_users(group, users):
+    # Sockets a rebuild adds to an existing node start at zero, not at the
+    # interface default, so every input is reset before saved values go back.
+    defaults = {
+        item.name: item.default_value
+        for item in group.interface.items_tree
+        if item.item_type == "SOCKET" and item.in_out == "INPUT" and hasattr(item, "default_value")
+    }
     for tree, node_name, links_in, links_out, values in users:
         node = tree.nodes.get(node_name)
         if node is None:
             continue
+        for socket in node.inputs:
+            if socket.name in defaults and hasattr(socket, "default_value"):
+                socket.default_value = defaults[socket.name]
         for from_name, from_id, to_name in links_in:
             source, target = tree.nodes.get(from_name), node.inputs.get(to_name)
             if source is not None and target is not None:
@@ -179,10 +212,11 @@ class _Graph:
         self.feed(node.inputs[1], b)
         return node.outputs[0]
 
-    def vector(self, operation, column, a=None, b=None, scale=None):
+    def vector(self, operation, column, a=None, b=None, c=None, scale=None):
         node = self.new("ShaderNodeVectorMath", column, step=150, operation=operation)
         self.feed(node.inputs[0], a)
         self.feed(node.inputs[1], b)
+        self.feed(node.inputs[2], c)
         self.feed(_socket(node.inputs, "Scale"), scale)
         return _socket(node.outputs, "Value" if operation == "DOT_PRODUCT" else "Vector")
 
@@ -207,6 +241,8 @@ def _build(group, preset):
             _new_input(iface, alpha_socket_name(slot), "NodeSocketFloat", slot.default_alpha(), 0.0, 1.0)
 
     semantics = preset.semantics
+    if semantics & set(TINT_SEMANTICS):
+        _new_input(iface, BASE_TINT, "NodeSocketColor", (1.0, 1.0, 1.0, 1.0))
     for name, default, low, high, needs in PARAMETERS:
         if needs in semantics:
             _new_input(iface, name, "NodeSocketFloat", default, low, high)
@@ -231,6 +267,20 @@ def _build(group, preset):
                 values[sem] = split.outputs["RGB".index(key)]
         if slot.uses_alpha:
             values[slot.semantic("A")] = group_in.outputs[alpha_socket_name(slot)]
+
+    for semantic in TINT_SEMANTICS:
+        if semantic in values:
+            tint = graph.new("ShaderNodeMix", 1, data_type="RGBA", blend_type="MULTIPLY")
+            tint.label = "Tint"
+            _socket(tint.inputs, "Factor_Float").default_value = 1.0
+            links.new(values[semantic], _socket(tint.inputs, "A_Color"))
+            links.new(group_in.outputs[BASE_TINT], _socket(tint.inputs, "B_Color"))
+            values[semantic] = _socket(tint.outputs, "Result_Color")
+
+    if "metallic" in values:
+        values["metallic"] = graph.math("MULTIPLY", 2, values["metallic"], group_in.outputs[METALLIC_STRENGTH])
+    if "gloss" in values:
+        values["gloss"] = graph.math("MULTIPLY", 2, values["gloss"], group_in.outputs[SMOOTHNESS_STRENGTH])
 
     if preset.is_specular:
         convert = graph.new("ShaderNodeGroup", 2, step=220)
@@ -278,21 +328,20 @@ def _build(group, preset):
 
     shading_normal = None
     if "normal" in values:
-        normal_color = values["normal"]
-        if preset.normal_format == "DIRECTX":
-            # Blender expects OpenGL (Y up): flip the green channel.
-            split = graph.new("ShaderNodeSeparateColor", 2)
-            join = graph.new("ShaderNodeCombineColor", 4)
-            join.label = "DirectX to OpenGL"
-            links.new(normal_color, split.inputs["Color"])
-            links.new(split.outputs["Red"], join.inputs["Red"])
-            links.new(graph.math("SUBTRACT", 3, 1.0, split.outputs["Green"]), join.inputs["Green"])
-            links.new(split.outputs["Blue"], join.inputs["Blue"])
-            normal_color = join.outputs["Color"]
+        normal_color = _to_opengl(graph, values["normal"], preset)
+        if "detail_normal" in values:
+            detail = _to_opengl(graph, values["detail_normal"], preset)
+            normal_color = _blend_detail(graph, normal_color, detail, group_in.outputs[DETAIL_STRENGTH])
         normal_map = graph.new("ShaderNodeNormalMap", 5)
         links.new(normal_color, normal_map.inputs["Color"])
         links.new(group_in.outputs[NORMAL_STRENGTH], normal_map.inputs["Strength"])
-        shading_normal = normal_map.outputs["Normal"]
+        unity = _unity_normal(graph, normal_color, group_in.outputs[NORMAL_STRENGTH])
+        pick = graph.new("ShaderNodeMix", 6, data_type="VECTOR")
+        pick.label = "Blender or Unity Tangents"
+        links.new(group_in.outputs[UNITY_TANGENTS], _socket(pick.inputs, "Factor_Float"))
+        links.new(normal_map.outputs["Normal"], _socket(pick.inputs, "A_Vector"))
+        links.new(unity, _socket(pick.inputs, "B_Vector"))
+        shading_normal = _socket(pick.outputs, "Result_Vector")
 
     if "height" in values:
         bump = graph.new("ShaderNodeBump", 5)
@@ -306,6 +355,77 @@ def _build(group, preset):
         links.new(shading_normal, bsdf.inputs["Normal"])
 
     links.new(bsdf.outputs["BSDF"], group_out.inputs[SHADER_OUTPUT])
+
+
+def _to_opengl(graph, color, preset):
+    """Blender reads OpenGL normals (Y up); flip the green channel of DirectX ones."""
+    if preset.normal_format != "DIRECTX":
+        return color
+    links = graph.links
+    split = graph.new("ShaderNodeSeparateColor", 2)
+    join = graph.new("ShaderNodeCombineColor", 4)
+    join.label = "DirectX to OpenGL"
+    links.new(color, split.inputs["Color"])
+    links.new(split.outputs["Red"], join.inputs["Red"])
+    links.new(graph.math("SUBTRACT", 3, 1.0, split.outputs["Green"]), join.inputs["Green"])
+    links.new(split.outputs["Blue"], join.inputs["Blue"])
+    return join.outputs["Color"]
+
+
+def _unpack(graph, color, column):
+    """Normal map color (0 to 1) to a tangent-space vector (-1 to 1)."""
+    return graph.vector("MULTIPLY_ADD", column, color, (2.0, 2.0, 2.0), (-1.0, -1.0, -1.0))
+
+
+def _blend_detail(graph, base_color, detail_color, strength):
+    """Unity's BlendNormals: add the XY slopes, multiply Z, renormalize.
+
+    Strength scales the detail slopes, like Unity's detail normal scale.
+    """
+    links = graph.links
+    base = graph.new("ShaderNodeSeparateXYZ", 3)
+    links.new(_unpack(graph, base_color, 2), base.inputs[0])
+    detail = graph.new("ShaderNodeSeparateXYZ", 3)
+    links.new(_unpack(graph, detail_color, 2), detail.inputs[0])
+    join = graph.new("ShaderNodeCombineXYZ", 4)
+    join.label = "Detail Blend"
+    for axis in (0, 1):
+        scaled = graph.math("MULTIPLY", 3, detail.outputs[axis], strength)
+        links.new(graph.math("ADD", 4, base.outputs[axis], scaled), join.inputs[axis])
+    links.new(graph.math("MULTIPLY", 4, base.outputs[2], detail.outputs[2]), join.inputs[2])
+    blended = graph.vector("NORMALIZE", 4, join.outputs[0])
+    return graph.vector("MULTIPLY_ADD", 4, blended, (0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+
+
+def _unity_normal(graph, color, strength):
+    """Tangent to world space with a per-vertex bitangent, as in Unity's built-in shaders.
+
+    Blender's Normal Map node rebuilds the bitangent per pixel. Maps baked for
+    Unity expect the one stored on the vertices, so LiveMat writes it to the
+    mesh (BITANGENT_ATTRIBUTE) and reads the interpolated value here.
+    """
+    links = graph.links
+    ts = graph.new("ShaderNodeSeparateXYZ", 5)
+    links.new(_unpack(graph, color, 5), ts.inputs[0])
+    tangent = graph.new("ShaderNodeTangent", 5, direction_type="UV_MAP")
+    geometry = graph.new("ShaderNodeNewGeometry", 5)
+    stored = graph.new("ShaderNodeAttribute", 5, attribute_type="GEOMETRY", attribute_name=BITANGENT_ATTRIBUTE)
+    to_world = graph.new(
+        "ShaderNodeVectorTransform", 5, vector_type="VECTOR", convert_from="OBJECT", convert_to="WORLD"
+    )
+    links.new(stored.outputs["Vector"], to_world.inputs["Vector"])
+    normal = geometry.outputs["Normal"]
+    t = graph.vector("SCALE", 6, tangent.outputs["Tangent"], scale=ts.outputs[0])
+    b = graph.vector("SCALE", 6, to_world.outputs["Vector"], scale=ts.outputs[1])
+    n = graph.vector("SCALE", 6, normal, scale=ts.outputs[2])
+    mapped = graph.vector("NORMALIZE", 6, graph.vector("ADD", 6, graph.vector("ADD", 6, t, b), n))
+    # Strength fades between the surface normal and the mapped one, like the Normal Map node.
+    fade = graph.new("ShaderNodeMix", 6, data_type="VECTOR", clamp_factor=False)
+    fade.label = "Unity Tangent Space"
+    links.new(strength, _socket(fade.inputs, "Factor_Float"))
+    links.new(normal, _socket(fade.inputs, "A_Vector"))
+    links.new(mapped, _socket(fade.inputs, "B_Vector"))
+    return graph.vector("NORMALIZE", 6, _socket(fade.outputs, "Result_Vector"))
 
 
 def _build_specgloss(group):

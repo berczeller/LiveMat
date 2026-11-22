@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "id": "default_specular",
-  "name": "Default Specular",
+  "name": "Default (Specular)",
   "description": "One file per map, as exported by Substance 3D Painter's PBR Specular Glossiness template.",
   "normal_format": "OPENGL",
   "gloss_curve": "LINEAR",

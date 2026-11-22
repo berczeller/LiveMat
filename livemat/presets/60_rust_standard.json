@@ -9,31 +9,31 @@
   "slots": [
     {
       "id": "bc",
-      "label": "Albedo",
+      "label": "Base Color",
       "suffixes": ["bc"],
       "channels": {"RGB": "base_color"}
     },
     {
       "id": "mg",
-      "label": "Metallic",
+      "label": "Metallic Gloss",
       "suffixes": ["mg"],
       "channels": {"R": "metallic", "A": "gloss"}
     },
     {
       "id": "nrm",
-      "label": "Normal Map",
+      "label": "Normal",
       "suffixes": ["nrm"],
       "channels": {"RGB": "normal"}
     },
     {
       "id": "ao",
-      "label": "Occlusion",
+      "label": "Ambient Occlusion",
       "suffixes": ["ao"],
       "channels": {"R": "ao"}
     },
     {
       "id": "disp",
-      "label": "Relief Map",
+      "label": "Displacement",
       "suffixes": ["disp"],
       "channels": {"R": "height"}
     },
@@ -45,7 +45,7 @@
     },
     {
       "id": "a",
-      "label": "Alpha Mask",
+      "label": "Alpha",
       "suffixes": ["a"],
       "channels": {"R": "alpha"}
     }

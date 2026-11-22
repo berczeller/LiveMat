@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 Tom Berczeller
 
-from . import operators, props, registry, ui, watch
+from . import icons, operators, props, registry, thumbs, ui, watch
 
 # Registered in this order, unregistered in reverse.
-_modules = (props, operators, ui, watch)
+_modules = (icons, thumbs, props, operators, ui, watch)
 
 
 def register():

@@ -10,11 +10,14 @@ from dataclasses import dataclass, field
 import bpy
 
 from ..core import naming
+from ..core.presets import DETAIL_SLOT_ID
 from ..core.scanner import TextureSet
 from . import nodegroup
 
 TAG = "livemat"  # custom property marking nodes LiveMat owns
 FRAME_LABEL = "Before LiveMat"
+KEPT_HELPERS = ("detail_uv", "detail_mapping")  # LiveMat nodes reused across rebuilds
+CHANNEL_INDEX = {"R": 0, "G": 1, "B": 2}
 _RENDER_METHOD = "livemat_render_method"  # the user's setting before LiveMat switched it
 
 # Names the same color spaces go by in other OCIO configs (ACES and friends).
@@ -56,6 +59,7 @@ def build_material(material, texture_set, preset, *, rebuild=False, folder=None)
 
     previous_values = {}
     kept = {}  # slot id -> image node reused from the last build
+    helpers = {}  # tag -> helper node reused from the last build
     if rebuild or _is_trivial(tree):
         nodes.clear()
     elif material.get("livemat_preset"):
@@ -64,6 +68,8 @@ def build_material(material, texture_set, preset, *, rebuild=False, folder=None)
             slot_id = node.get("livemat_slot")
             if node.bl_idname == "ShaderNodeTexImage" and preset.slot(slot_id) and slot_id not in kept:
                 kept[slot_id] = node
+            elif node[TAG] in KEPT_HELPERS and node[TAG] not in helpers:
+                helpers[node[TAG]] = node
             else:
                 nodes.remove(node)
     else:
@@ -87,8 +93,7 @@ def build_material(material, texture_set, preset, *, rebuild=False, folder=None)
     old_stamp = previous_values.pop(_STAMP, None)
     if old_stamp != group_node.node_tree.get("livemat_stamp"):
         # A different preset or builder: slot defaults may mean something else now.
-        parameters = {name for name, *_rest in nodegroup.PARAMETERS}
-        previous_values = {k: v for k, v in previous_values.items() if k in parameters}
+        previous_values = {k: v for k, v in previous_values.items() if k in nodegroup.PARAMETER_NAMES}
     for name, value in previous_values.items():
         socket = group_node.inputs.get(name)
         if socket is not None and not socket.is_linked:
@@ -115,12 +120,18 @@ def build_material(material, texture_set, preset, *, rebuild=False, folder=None)
         tex.image = image
         tex.label = slot.label
         y -= 280
-        links.new(tex.outputs["Color"], group_node.inputs[slot.label])
+        color, alpha = _remap_channels(tree, tex, slot, channel_map(material, slot))
+        links.new(color, group_node.inputs[slot.label])
         if slot.uses_alpha:
-            links.new(tex.outputs["Alpha"], group_node.inputs[nodegroup.alpha_socket_name(slot)])
+            links.new(alpha, group_node.inputs[nodegroup.alpha_socket_name(slot)])
         report.loaded[slot.id] = image.name
 
+    _detail_uvs(tree, helpers, builder_nodes(tree).get(DETAIL_SLOT_ID))
     links.new(group_node.outputs[nodegroup.SHADER_OUTPUT], output.inputs["Surface"])
+    unity = getattr(getattr(material, "livemat", None), "tangents", "BLENDER") == "UNITY"
+    socket = group_node.inputs.get(nodegroup.UNITY_TANGENTS)
+    if socket is not None:
+        socket.default_value = 1.0 if unity else 0.0
 
     material["livemat_preset"] = preset.id
     material["livemat_set"] = texture_set.name
@@ -139,7 +150,98 @@ def build_material(material, texture_set, preset, *, rebuild=False, folder=None)
         except TypeError:
             pass
         del material[_RENDER_METHOD]
+    _sync_state(material, preset)
     return report
+
+
+def builder_nodes(tree):
+    """Slot id -> image node, read from a node tree."""
+    return {n["livemat_slot"]: n for n in tree.nodes if n.get("livemat_slot")}
+
+
+def channel_map(material, slot):
+    """Channels the user rerouted for `slot`: {channel the preset reads: channel to read instead}."""
+    state = getattr(material, "livemat", None)
+    if state is None or slot.semantic("RGB"):
+        return {}
+    item = next((s for s in state.slots if s.slot == slot.id), None)
+    if item is None:
+        return {}
+    mapping = {}
+    for channel, _semantic in slot.channels:
+        source = getattr(item, f"src_{channel}")
+        if source != channel:
+            mapping[channel] = source
+    return mapping
+
+
+def _remap_channels(tree, tex, slot, mapping):
+    """Color and alpha outputs for the group, with channels swapped per `mapping`."""
+    color, alpha = tex.outputs["Color"], tex.outputs["Alpha"]
+    if not mapping:
+        return color, alpha
+    nodes, links = tree.nodes, tree.links
+    split = nodes.new("ShaderNodeSeparateColor")
+    join = nodes.new("ShaderNodeCombineColor")
+    for node, dx in ((split, 300), (join, 480)):
+        node.location = (tex.location.x + dx, tex.location.y)
+        node.hide = True
+        node[TAG] = "channels"
+    split.label = join.label = f"{slot.label} Channels"
+    links.new(color, split.inputs["Color"])
+
+    def source(channel):
+        return alpha if channel == "A" else split.outputs[CHANNEL_INDEX[channel]]
+
+    for channel, index in CHANNEL_INDEX.items():
+        links.new(source(mapping.get(channel, channel)), join.inputs[index])
+    return join.outputs["Color"], source(mapping.get("A", "A"))
+
+
+def _detail_uvs(tree, helpers, detail_tex):
+    """UVs times a tiling factor for the detail normal, like Unity's detail tiling."""
+    nodes, links = tree.nodes, tree.links
+    if detail_tex is None:
+        for node in helpers.values():
+            nodes.remove(node)
+        return
+    coords = helpers.get("detail_uv")
+    if coords is None:
+        coords = nodes.new("ShaderNodeTexCoord")
+        coords[TAG] = "detail_uv"
+        coords.hide = True
+    mapping = helpers.get("detail_mapping")
+    if mapping is None:
+        mapping = nodes.new("ShaderNodeMapping")
+        mapping[TAG] = "detail_mapping"
+        mapping.label = "Detail Tiling"
+    coords.location = (detail_tex.location.x - 420, detail_tex.location.y)
+    mapping.location = (detail_tex.location.x - 220, detail_tex.location.y)
+    if not mapping.inputs["Vector"].is_linked:
+        links.new(coords.outputs["UV"], mapping.inputs["Vector"])
+    if not detail_tex.inputs["Vector"].is_linked:
+        links.new(mapping.outputs["Vector"], detail_tex.inputs["Vector"])
+
+
+def detail_mapping(material):
+    if material is None or material.node_tree is None:
+        return None
+    return next((n for n in material.node_tree.nodes if n.get(TAG) == "detail_mapping"), None)
+
+
+def _sync_state(material, preset):
+    """One UI state entry per preset slot (channel routing, texture picker)."""
+    state = getattr(material, "livemat", None)
+    if state is None:  # the add-on's properties aren't registered (tests, scripts)
+        return
+    wanted = [slot.id for slot in preset.slots]
+    for index in reversed(range(len(state.slots))):
+        if state.slots[index].slot not in wanted:
+            state.slots.remove(index)
+    present = {item.slot for item in state.slots}
+    for slot_id in wanted:
+        if slot_id not in present:
+            state.slots.add().slot = slot_id
 
 
 def store_folder(material, folder):
@@ -182,7 +284,7 @@ def livemat_texture_nodes(material):
     """Slot id -> image texture node, for the nodes LiveMat added."""
     if material is None or material.node_tree is None:
         return {}
-    return {n["livemat_slot"]: n for n in material.node_tree.nodes if n.get("livemat_slot")}
+    return builder_nodes(material.node_tree)
 
 
 def livemat_group_node(material):

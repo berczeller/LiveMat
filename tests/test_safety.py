@@ -25,12 +25,21 @@ class SharedGroupTest(OperatorTestBase):
         barrel_group.inputs[nodegroup.NORMAL_STRENGTH].default_value = 0.7
         before = linked_inputs(barrel_group)
 
-        nodegroup.find_group("default_metal_rough")["livemat_stamp"] = "outdated"
+        # Pretend the group comes from an older LiveMat without the tint input.
+        group = nodegroup.find_group("default_metal_rough")
+        group.interface.remove(next(i for i in group.interface.items_tree if i.name == nodegroup.BASE_TINT))
+        group["livemat_stamp"] = "outdated"
         bpy.ops.livemat.build(index=[s.name for s in self.props.sets].index("Crate"))
 
         self.assertEqual(linked_inputs(barrel_group), before)
         self.assertTrue(barrel_group.outputs[nodegroup.SHADER_OUTPUT].is_linked)
         self.assertAlmostEqual(barrel_group.inputs[nodegroup.NORMAL_STRENGTH].default_value, 0.7)
+        # New inputs start at their defaults, not at zero.
+        self.assertEqual(tuple(barrel_group.inputs[nodegroup.BASE_TINT].default_value), (1.0, 1.0, 1.0, 1.0))
+        self.assertEqual(barrel_group.inputs[nodegroup.METALLIC_STRENGTH].default_value, 1.0)
+        # Unlinked slots keep their defaults too: a black Opacity would hide the material.
+        self.assertEqual(tuple(barrel_group.inputs["Opacity"].default_value), (1.0, 1.0, 1.0, 1.0))
+        self.assertEqual(tuple(barrel_group.inputs["Detail Normal"].default_value), (0.5, 0.5, 1.0, 1.0))
 
     def test_helper_rebuild_keeps_preset_groups_linked(self):
         make_texture_set(self.folder, "skin", {"_bc": (90, 60, 40), "_sg": (20, 20, 20, 160)})
@@ -138,3 +147,18 @@ class ExistingDataTest(OperatorTestBase):
         crate = bpy.data.materials["Crate"]
         self.assertEqual(builder.material_folder(crate), os.path.normpath(self.folder))
         self.assertTrue(crate["livemat_recursive"])
+
+
+class RenamedSlotTest(OperatorTestBase):
+    def test_refresh_relinks_after_a_slot_is_renamed(self):
+        make_texture_set(self.folder, "Crate", METAL_ROUGH)
+        make_texture_set(self.folder, "Barrel", METAL_ROUGH)
+        bpy.ops.livemat.build()
+        barrel = builder.livemat_group_node(bpy.data.materials["Barrel"])
+        # Simulate an older group whose Normal socket had another name.
+        group = nodegroup.find_group("default_metal_rough")
+        next(i for i in group.interface.items_tree if i.name == "Normal").name = "Normal Map"
+        group["livemat_stamp"] = "outdated"
+        bpy.ops.livemat.refresh()
+        barrel = builder.livemat_group_node(bpy.data.materials["Barrel"])
+        self.assertTrue(barrel.inputs["Normal"].is_linked)

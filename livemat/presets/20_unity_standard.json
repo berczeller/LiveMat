@@ -14,7 +14,7 @@
     },
     {
       "id": "metallic_smoothness",
-      "label": "Metallic",
+      "label": "Metallic Smoothness",
       "suffixes": ["metallicsmoothness", "metallic_smoothness", "metallic", "metalness", "metal"],
       "channels": {"R": "metallic", "A": "gloss"}
     },

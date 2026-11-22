@@ -14,7 +14,7 @@
     },
     {
       "id": "specular_smoothness",
-      "label": "Specular",
+      "label": "Specular Smoothness",
       "suffixes": ["specularsmoothness", "specular_smoothness", "specular", "spec"],
       "channels": {"RGB": "specular", "A": "gloss"}
     },

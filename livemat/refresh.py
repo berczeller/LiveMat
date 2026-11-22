@@ -9,6 +9,7 @@ import bpy
 
 from . import registry
 from .build import material as builder
+from .build import nodegroup
 from .core import scanner
 
 CLEARED = "livemat_cleared"  # slots the user emptied on purpose; Refresh leaves them empty
@@ -78,7 +79,17 @@ def update_material(material):
                 else:
                     merged.udim_slots.discard(slot_id)
 
-    rebuilt = merged.files != current.files
+    group_node = builder.livemat_group_node(material)
+    outdated = group_node is None or group_node.node_tree is None or (
+        group_node.node_tree.get("livemat_stamp") != nodegroup.stamp(preset)
+    )
+    state = getattr(material, "livemat", None)
+    unsynced = state is not None and len(state.slots) != len(preset.slots)
+    # A slot renamed in the preset drops this material's links when another
+    # material rebuilds the shared group first.
+    unlinked = any(not n.outputs["Color"].is_linked for n in builder.livemat_texture_nodes(material).values())
+    # Files changed, an add-on update brought new group inputs or panel state, or links went missing.
+    rebuilt = merged.files != current.files or outdated or unsynced or unlinked
     if rebuilt:
         builder.build_material(material, merged, preset, folder=folder)
     missing = sorted(s for s, path in merged.files.items() if not os.path.isfile(path))

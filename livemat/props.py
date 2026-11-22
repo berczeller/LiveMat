@@ -13,8 +13,56 @@ from bpy.props import (
     StringProperty,
 )
 
-from . import registry
+from . import actions, registry
 from .core.scanner import TextureSet
+
+_CHANNELS = [
+    ("R", "R", "Read the red channel", 1),
+    ("G", "G", "Read the green channel", 2),
+    ("B", "B", "Read the blue channel", 3),
+    ("A", "A", "Read the alpha channel", 4),
+]
+
+
+def _channel(default):
+    return EnumProperty(
+        name="Channel",
+        items=_CHANNELS,
+        default=default,
+        description="Texture channel this value is read from",
+        update=actions.channels_changed,
+    )
+
+
+class LiveMatSlotState(bpy.types.PropertyGroup):
+    """Per-material choices for one preset slot."""
+
+    slot: StringProperty()
+    src_R: _channel("R")
+    src_G: _channel("G")
+    src_B: _channel("B")
+    src_A: _channel("A")
+    texture: EnumProperty(
+        name="Texture",
+        description="Click to pick a texture from the material's folder",
+        items=actions.picker_items,
+        get=actions.picker_get,
+        set=actions.picker_set,
+    )
+
+
+class LiveMatMaterial(bpy.types.PropertyGroup):
+    slots: CollectionProperty(type=LiveMatSlotState)
+    tangents: EnumProperty(
+        name="Tangents",
+        items=[
+            ("BLENDER", "Blender", "Per-pixel bitangent, like Blender, Unreal and Unity HDRP", 0),
+            ("UNITY", "Unity", "Per-vertex bitangent, like Unity's built-in shaders. Writes a hidden attribute to the meshes", 1),
+        ],
+        default="BLENDER",
+        description="How normal maps are turned from tangent space into the surface normal",
+        update=actions.tangents_changed,
+    )
 
 
 class LiveMatSlotFile(bpy.types.PropertyGroup):
@@ -78,16 +126,18 @@ class LiveMatScene(bpy.types.PropertyGroup):
     saved_view: StringProperty()
 
 
-_classes = (LiveMatSlotFile, LiveMatSet, LiveMatScene)
+_classes = (LiveMatSlotState, LiveMatMaterial, LiveMatSlotFile, LiveMatSet, LiveMatScene)
 
 
 def register():
     for cls in _classes:
         bpy.utils.register_class(cls)
     bpy.types.Scene.livemat = PointerProperty(type=LiveMatScene)
+    bpy.types.Material.livemat = PointerProperty(type=LiveMatMaterial)
 
 
 def unregister():
+    del bpy.types.Material.livemat
     del bpy.types.Scene.livemat
     for cls in reversed(_classes):
         bpy.utils.unregister_class(cls)

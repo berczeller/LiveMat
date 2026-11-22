@@ -48,6 +48,7 @@ SEMANTICS = {
     "ao": "value",
     "alpha": "value",
     "height": "value",
+    "detail_normal": "vector",
 }
 
 COLOR_SEMANTICS = frozenset(s for s, kind in SEMANTICS.items() if kind == "color")
@@ -65,7 +66,12 @@ SEMANTIC_DEFAULTS = {
     "ao": 1.0,
     "alpha": 1.0,
     "height": 0.5,
+    "detail_normal": (0.5, 0.5, 1.0),
 }
+
+# Every preset gets an optional detail normal slot, like Unity's detail layer.
+DETAIL_SLOT_ID = "detail_normal"
+DETAIL_SUFFIXES = ("detail_normal", "detailnormal", "detail_nrm", "detail_n", "dnrm")
 
 CHANNEL_KEYS = ("RGB", "R", "G", "B", "A")
 NORMAL_FORMATS = ("OPENGL", "DIRECTX")
@@ -230,6 +236,19 @@ def preset_from_dict(data, *, builtin=False):
                 colorspace=colorspace,
             )
         )
+
+    if "detail_normal" not in seen_semantics and DETAIL_SLOT_ID not in seen_slots:
+        free = tuple(s for s in DETAIL_SUFFIXES if normalize(s) not in seen_suffixes)
+        if free and not any(s.label == "Detail Normal" for s in slots):
+            slots.append(
+                Slot(
+                    id=DETAIL_SLOT_ID,
+                    label="Detail Normal",
+                    suffixes=free,
+                    channels=(("RGB", "detail_normal"),),
+                    colorspace="Non-Color",
+                )
+            )
 
     if seen_semantics & SPECULAR_SEMANTICS and seen_semantics & METALLIC_SEMANTICS:
         fail("mixes spec/gloss maps (diffuse, specular) with metal/rough ones (base_color, metallic)")

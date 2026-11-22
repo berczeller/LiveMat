@@ -72,7 +72,7 @@ class MaterialTest(BuildTestBase):
         self.assertEqual(image.alpha_mode, "CHANNEL_PACKED")
         self.assertEqual(bpy.data.images["crate_Albedo.png"].alpha_mode, "STRAIGHT")
         group_node = self.livemat_group(material)
-        self.assertTrue(group_node.inputs["Metallic Alpha"].is_linked)
+        self.assertTrue(group_node.inputs["Metallic Smoothness Alpha"].is_linked)
 
     def test_images_are_reused(self):
         make_texture_set(self.folder, "crate", METAL_ROUGH)
@@ -129,7 +129,8 @@ class NodeGroupTest(BuildTestBase):
 
     def test_directx_flips_green(self):
         group = nodegroup.ensure_group(self.presets["unreal"])
-        self.assertEqual(len(self.inner(group, "ShaderNodeCombineColor")), 1)
+        # One flip for the normal map, one for the detail normal.
+        self.assertEqual(len(self.inner(group, "ShaderNodeCombineColor")), 2)
         group = nodegroup.ensure_group(self.presets["default_metal_rough"])
         self.assertEqual(self.inner(group, "ShaderNodeCombineColor"), [])
 

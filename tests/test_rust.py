@@ -86,6 +86,7 @@ class GlossCurveTest(unittest.TestCase):
         return ops
 
     def test_curves(self):
-        self.assertEqual(self.chain("LINEAR"), ["SUBTRACT"])
-        self.assertEqual(self.chain("SQUARED"), ["POWER", "SUBTRACT"])
-        self.assertEqual(self.chain("SQRT"), ["SUBTRACT", "SQRT"])
+        # Read from the BSDF back: the curve, then the Smoothness Strength multiply.
+        self.assertEqual(self.chain("LINEAR"), ["SUBTRACT", "MULTIPLY"])
+        self.assertEqual(self.chain("SQUARED"), ["POWER", "SUBTRACT", "MULTIPLY"])
+        self.assertEqual(self.chain("SQRT"), ["SUBTRACT", "SQRT", "MULTIPLY"])
