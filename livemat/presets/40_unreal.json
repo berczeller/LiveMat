@@ -1,0 +1,58 @@
+{
+  "schema": 1,
+  "id": "unreal",
+  "name": "Unreal",
+  "description": "One file per map with Unreal's short suffixes and DirectX normals.",
+  "normal_format": "DIRECTX",
+  "gloss_curve": "LINEAR",
+  "slots": [
+    {
+      "id": "base_color",
+      "label": "Base Color",
+      "suffixes": ["basecolor", "base_color", "albedo", "bc", "d", "diffuse", "color"],
+      "channels": {"RGB": "base_color"}
+    },
+    {
+      "id": "metallic",
+      "label": "Metallic",
+      "suffixes": ["metallic", "metalness", "metal", "m"],
+      "channels": {"R": "metallic"}
+    },
+    {
+      "id": "roughness",
+      "label": "Roughness",
+      "suffixes": ["roughness", "rough", "r"],
+      "channels": {"R": "roughness"}
+    },
+    {
+      "id": "normal",
+      "label": "Normal",
+      "suffixes": ["normal", "normal_directx", "nrm", "n"],
+      "channels": {"RGB": "normal"}
+    },
+    {
+      "id": "ao",
+      "label": "Ambient Occlusion",
+      "suffixes": ["ambientocclusion", "occlusion", "ao"],
+      "channels": {"R": "ao"}
+    },
+    {
+      "id": "height",
+      "label": "Height",
+      "suffixes": ["height", "displacement", "h"],
+      "channels": {"R": "height"}
+    },
+    {
+      "id": "emission",
+      "label": "Emissive",
+      "suffixes": ["emissive", "emission", "e"],
+      "channels": {"RGB": "emission"}
+    },
+    {
+      "id": "opacity",
+      "label": "Opacity",
+      "suffixes": ["opacity", "alpha", "a"],
+      "channels": {"R": "alpha"}
+    }
+  ]
+}

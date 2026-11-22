@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "id": "unity_mask_map",
+  "name": "Unity Mask Map (URP/HDRP)",
+  "description": "Mask Map packing: metallic R, occlusion G, detail mask B, smoothness A.",
+  "normal_format": "OPENGL",
+  "gloss_curve": "LINEAR",
+  "slots": [
+    {
+      "id": "base_map",
+      "label": "Base Map",
+      "suffixes": ["basemap", "base_map", "albedotransparency", "albedo", "basecolor", "base_color", "color"],
+      "channels": {"RGB": "base_color", "A": "alpha"}
+    },
+    {
+      "id": "mask_map",
+      "label": "Mask Map",
+      "suffixes": ["maskmap", "mask_map", "mask"],
+      "channels": {"R": "metallic", "G": "ao", "A": "gloss"}
+    },
+    {
+      "id": "normal",
+      "label": "Normal Map",
+      "suffixes": ["normal", "normalmap", "normal_map", "nrm", "n"],
+      "channels": {"RGB": "normal"}
+    },
+    {
+      "id": "height",
+      "label": "Height Map",
+      "suffixes": ["height", "heightmap", "parallax"],
+      "channels": {"R": "height"}
+    },
+    {
+      "id": "emission",
+      "label": "Emission",
+      "suffixes": ["emission", "emissive"],
+      "channels": {"RGB": "emission"}
+    }
+  ]
+}

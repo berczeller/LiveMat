@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "id": "unreal_packed",
+  "name": "Unreal Packed",
+  "description": "Occlusion, roughness and metallic packed into one ORM texture, DirectX normals.",
+  "normal_format": "DIRECTX",
+  "gloss_curve": "LINEAR",
+  "slots": [
+    {
+      "id": "base_color",
+      "label": "Base Color",
+      "suffixes": ["basecolor", "base_color", "albedo", "bc", "d", "diffuse", "color"],
+      "channels": {"RGB": "base_color"}
+    },
+    {
+      "id": "orm",
+      "label": "Occlusion Roughness Metallic",
+      "suffixes": ["occlusionroughnessmetallic", "orm", "arm"],
+      "channels": {"R": "ao", "G": "roughness", "B": "metallic"}
+    },
+    {
+      "id": "normal",
+      "label": "Normal",
+      "suffixes": ["normal", "normal_directx", "nrm", "n"],
+      "channels": {"RGB": "normal"}
+    },
+    {
+      "id": "height",
+      "label": "Height",
+      "suffixes": ["height", "displacement", "h"],
+      "channels": {"R": "height"}
+    },
+    {
+      "id": "emission",
+      "label": "Emissive",
+      "suffixes": ["emissive", "emission", "e"],
+      "channels": {"RGB": "emission"}
+    },
+    {
+      "id": "opacity",
+      "label": "Opacity",
+      "suffixes": ["opacity", "alpha", "a"],
+      "channels": {"R": "alpha"}
+    }
+  ]
+}
