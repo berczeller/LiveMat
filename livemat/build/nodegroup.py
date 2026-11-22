@@ -14,7 +14,7 @@ import bpy
 from ..core.presets import SEMANTIC_DEFAULTS
 
 # Bump this when the generated node layout changes, so existing groups rebuild.
-BUILDER_VERSION = 2
+BUILDER_VERSION = 3
 
 GROUP_PREFIX = "LiveMat "
 SHADER_OUTPUT = "BSDF"

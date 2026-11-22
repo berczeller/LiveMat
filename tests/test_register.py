@@ -4,7 +4,7 @@ import bpy
 
 import livemat
 
-PANELS = ("LIVEMAT_PT_view3d", "LIVEMAT_PT_shader_editor")
+PANELS = ("LIVEMAT_PT_view3d", "LIVEMAT_PT_shader_editor", "LIVEMAT_PT_material", "LIVEMAT_OT_scan")
 
 
 class RegisterTest(unittest.TestCase):

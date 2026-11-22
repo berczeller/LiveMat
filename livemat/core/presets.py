@@ -116,7 +116,10 @@ class Slot:
         if rgb:
             r, g, b = SEMANTIC_DEFAULTS[rgb]
         else:
-            r, g, b = (SEMANTIC_DEFAULTS.get(self.semantic(c), 0.0) for c in "RGB")
+            used = [SEMANTIC_DEFAULTS[self.semantic(c)] for c in "RGB" if self.semantic(c)]
+            # Unused channels repeat the first used one, so a one-channel map reads as gray.
+            fill = used[0] if used else 0.0
+            r, g, b = (SEMANTIC_DEFAULTS[self.semantic(c)] if self.semantic(c) else fill for c in "RGB")
         return (r, g, b, 1.0)
 
     def default_alpha(self):

@@ -60,6 +60,10 @@ class ValidationTest(unittest.TestCase):
         self.assertEqual(mg.default_color(), (0.0, 0.0, 0.0, 1.0))
         self.assertEqual(mg.default_alpha(), 0.5)
 
+    def test_single_channel_default_is_gray(self):
+        height = presets.load_builtin_presets()["default_metal_rough"].slot("height")
+        self.assertEqual(height.default_color(), (0.5, 0.5, 0.5, 1.0))
+
     def test_fingerprint_changes_with_content(self):
         a = presets.preset_from_dict(VALID)
         b = presets.preset_from_dict(variant(normal_format="DIRECTX"))

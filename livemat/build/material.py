@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 
 import bpy
 
+from ..core import naming
+from ..core.scanner import TextureSet
 from . import nodegroup
 
 TAG = "livemat"  # custom property marking nodes LiveMat owns
@@ -23,7 +25,7 @@ class BuildReport:
     kept_aside: bool = False
 
 
-def build_material(material, texture_set, preset, *, rebuild=False):
+def build_material(material, texture_set, preset, *, rebuild=False, folder=None):
     """Wire `texture_set` into `material` using `preset`.
 
     Existing nodes are handled in this order:
@@ -32,6 +34,9 @@ def build_material(material, texture_set, preset, *, rebuild=False):
       group parameters carry over.
     - A lone Principled BSDF + Output (a fresh or imported material) is cleared.
     - Anything else is kept in a "Before LiveMat" frame, disconnected.
+
+    `folder` is remembered on the material so it can be rescanned later,
+    for example to switch presets.
     """
     tree = material.node_tree
     nodes, links = tree.nodes, tree.links
@@ -61,6 +66,11 @@ def build_material(material, texture_set, preset, *, rebuild=False):
     group_node.location = (0, top)
     group_node.width = 240
     group_node[TAG] = "group"
+    old_stamp = previous_values.pop(_STAMP, None)
+    if old_stamp != group_node.node_tree.get("livemat_stamp"):
+        # A different preset or builder: slot defaults may mean something else now.
+        parameters = {name for name, *_rest in nodegroup.PARAMETERS}
+        previous_values = {k: v for k, v in previous_values.items() if k in parameters}
     for name, value in previous_values.items():
         socket = group_node.inputs.get(name)
         if socket is not None and not socket.is_linked:
@@ -89,11 +99,47 @@ def build_material(material, texture_set, preset, *, rebuild=False):
 
     material["livemat_preset"] = preset.id
     material["livemat_set"] = texture_set.name
+    material["livemat_key"] = texture_set.key
+    if folder is not None:
+        material["livemat_folder"] = folder
     alpha_slot = preset.slot_for("alpha")
     if alpha_slot is not None and alpha_slot.id in report.loaded:
         # Dithered handles cutouts and hashed transparency in Eevee without sorting issues.
         material.surface_render_method = "DITHERED"
     return report
+
+
+def texture_set_from_material(material):
+    """The texture set a LiveMat material was built from, read back from its image nodes."""
+    texture_set = TextureSet(
+        name=material.get("livemat_set", material.name),
+        key=material.get("livemat_key") or naming.asset_key(material.name),
+    )
+    for node in material.node_tree.nodes:
+        slot_id = node.get("livemat_slot")
+        image = getattr(node, "image", None)
+        if not slot_id or image is None or not image.filepath:
+            continue
+        path = bpy.path.abspath(image.filepath, library=image.library)
+        if image.source == "TILED":
+            first = min(tile.number for tile in image.tiles)
+            path = path.replace("<UDIM>", str(first))
+            texture_set.udim_slots.add(slot_id)
+        texture_set.files[slot_id] = path
+    return texture_set
+
+
+def livemat_texture_nodes(material):
+    """Slot id -> image texture node, for the nodes LiveMat added."""
+    if material is None or material.node_tree is None:
+        return {}
+    return {n["livemat_slot"]: n for n in material.node_tree.nodes if n.get("livemat_slot")}
+
+
+def livemat_group_node(material):
+    if material is None or material.node_tree is None:
+        return None
+    return next((n for n in material.node_tree.nodes if n.get(TAG) == "group"), None)
 
 
 _TILE = re.compile(r"1\d{3}(?=\D*$)")
@@ -139,12 +185,15 @@ def _material_output(tree):
     return tree.nodes.new("ShaderNodeOutputMaterial")
 
 
+_STAMP = object()  # key for the old group's stamp in _group_values' result
+
+
 def _group_values(tree):
     """Unlinked input values on the current LiveMat group node, by socket name."""
     group_node = next((n for n in tree.nodes if n.get(TAG) == "group"), None)
-    if group_node is None:
+    if group_node is None or group_node.node_tree is None:
         return {}
-    values = {}
+    values = {_STAMP: group_node.node_tree.get("livemat_stamp")}
     for socket in group_node.inputs:
         if not socket.is_linked and hasattr(socket, "default_value"):
             value = socket.default_value
