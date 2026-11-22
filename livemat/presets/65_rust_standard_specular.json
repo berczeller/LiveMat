@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "id": "rust_standard_specular",
+  "name": "Rust Standard (Spec/Gloss)",
+  "description": "Rust's spec/gloss variant used for skins: _bc as diffuse, _sg (specular RGB, gloss A), _nrm (OpenGL), _ao.",
+  "normal_format": "OPENGL",
+  "gloss_curve": "LINEAR",
+  "ignore": ["bc_ao", "hm_ao_gloss"],
+  "slots": [
+    {
+      "id": "bc",
+      "label": "Diffuse",
+      "suffixes": ["bc"],
+      "channels": {"RGB": "diffuse"}
+    },
+    {
+      "id": "sg",
+      "label": "Specular",
+      "suffixes": ["sg"],
+      "channels": {"RGB": "specular", "A": "gloss"}
+    },
+    {
+      "id": "nrm",
+      "label": "Normal Map",
+      "suffixes": ["nrm"],
+      "channels": {"RGB": "normal"}
+    },
+    {
+      "id": "ao",
+      "label": "Occlusion",
+      "suffixes": ["ao"],
+      "channels": {"R": "ao"}
+    },
+    {
+      "id": "disp",
+      "label": "Relief Map",
+      "suffixes": ["disp"],
+      "channels": {"R": "height"}
+    },
+    {
+      "id": "em",
+      "label": "Emission",
+      "suffixes": ["em"],
+      "channels": {"RGB": "emission"}
+    },
+    {
+      "id": "a",
+      "label": "Alpha Mask",
+      "suffixes": ["a"],
+      "channels": {"R": "alpha"}
+    }
+  ]
+}

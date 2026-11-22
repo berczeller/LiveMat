@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "id": "rust_standard",
+  "name": "Rust Standard",
+  "description": "Rust's Standard shader, metal/gloss: _bc, _mg (metal RGB, gloss A), _nrm (OpenGL), _ao.",
+  "normal_format": "OPENGL",
+  "gloss_curve": "LINEAR",
+  "ignore": ["bc_ao", "hm_ao_gloss"],
+  "slots": [
+    {
+      "id": "bc",
+      "label": "Albedo",
+      "suffixes": ["bc"],
+      "channels": {"RGB": "base_color"}
+    },
+    {
+      "id": "mg",
+      "label": "Metallic",
+      "suffixes": ["mg"],
+      "channels": {"R": "metallic", "A": "gloss"}
+    },
+    {
+      "id": "nrm",
+      "label": "Normal Map",
+      "suffixes": ["nrm"],
+      "channels": {"RGB": "normal"}
+    },
+    {
+      "id": "ao",
+      "label": "Occlusion",
+      "suffixes": ["ao"],
+      "channels": {"R": "ao"}
+    },
+    {
+      "id": "disp",
+      "label": "Relief Map",
+      "suffixes": ["disp"],
+      "channels": {"R": "height"}
+    },
+    {
+      "id": "em",
+      "label": "Emission",
+      "suffixes": ["em"],
+      "channels": {"RGB": "emission"}
+    },
+    {
+      "id": "a",
+      "label": "Alpha Mask",
+      "suffixes": ["a"],
+      "channels": {"R": "alpha"}
+    }
+  ]
+}

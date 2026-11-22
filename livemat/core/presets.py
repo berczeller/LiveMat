@@ -38,6 +38,8 @@ BUILTIN_DIR = Path(__file__).resolve().parent.parent / "presets"
 # Semantic -> kind. "color" and "vector" read RGB, "value" reads one channel.
 SEMANTICS = {
     "base_color": "color",
+    "diffuse": "color",
+    "specular": "color",
     "emission": "color",
     "normal": "vector",
     "metallic": "value",
@@ -53,6 +55,8 @@ COLOR_SEMANTICS = frozenset(s for s, kind in SEMANTICS.items() if kind == "color
 # What a semantic reads as when its texture is missing.
 SEMANTIC_DEFAULTS = {
     "base_color": (0.8, 0.8, 0.8),
+    "diffuse": (0.8, 0.8, 0.8),
+    "specular": (0.04, 0.04, 0.04),  # dielectric F0
     "emission": (0.0, 0.0, 0.0),
     "normal": (0.5, 0.5, 1.0),
     "metallic": 0.0,
@@ -65,7 +69,12 @@ SEMANTIC_DEFAULTS = {
 
 CHANNEL_KEYS = ("RGB", "R", "G", "B", "A")
 NORMAL_FORMATS = ("OPENGL", "DIRECTX")
-GLOSS_CURVES = ("LINEAR", "SQUARED")
+# How stored gloss turns into roughness: LINEAR 1 - g, SQUARED (1 - g)^2, SQRT 1 - sqrt(g).
+GLOSS_CURVES = ("LINEAR", "SQUARED", "SQRT")
+
+# Spec/gloss and metal/rough describe the same surface in different terms; a preset picks one.
+SPECULAR_SEMANTICS = frozenset({"diffuse", "specular"})
+METALLIC_SEMANTICS = frozenset({"base_color", "metallic"})
 COLORSPACES = ("sRGB", "Non-Color")
 
 _ID = re.compile(r"^[a-z0-9_]+$")
@@ -136,6 +145,10 @@ class Preset:
     @property
     def semantics(self):
         return {sem for slot in self.slots for sem in slot.semantics}
+
+    @property
+    def is_specular(self):
+        return bool(self.semantics & SPECULAR_SEMANTICS)
 
 
 def preset_from_dict(data, *, builtin=False):
@@ -214,6 +227,9 @@ def preset_from_dict(data, *, builtin=False):
                 colorspace=colorspace,
             )
         )
+
+    if seen_semantics & SPECULAR_SEMANTICS and seen_semantics & METALLIC_SEMANTICS:
+        fail("mixes spec/gloss maps (diffuse, specular) with metal/rough ones (base_color, metallic)")
 
     canonical = json.dumps(data, sort_keys=True, separators=(",", ":"))
     return Preset(

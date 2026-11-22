@@ -26,13 +26,25 @@ Custom presets with a template editor follow in 0.2.0.
 
 | Preset | Maps | Normal |
 |---|---|---|
-| Default (Metal/Rough) | Base Color, Metallic, Roughness, Normal, Height, AO, Emissive | OpenGL |
-| Default Specular | Diffuse, Specular, Glossiness, Normal | OpenGL |
-| Unity Standard | Albedo, Metallic (R) + Smoothness (A), Normal, Occlusion | OpenGL |
-| Unity Mask Map (URP/HDRP) | Base Map, Mask Map (Metal R, AO G, Detail B, Smoothness A), Normal | OpenGL |
-| Unreal | Base Color, Metallic, Roughness, Normal | DirectX |
-| Unreal Packed | Base Color, ORM (AO R, Roughness G, Metal B), Normal | DirectX |
-| Rust Standard | `_bc`, `_mg` (Metal RGB + Gloss A), `_nrm`, `_ao` | OpenGL |
+| Default (Metal/Rough) | Base Color, Metallic, Roughness, Normal, Height, AO, Emissive, Opacity | OpenGL |
+| Default Specular | Diffuse, Specular, Glossiness, Normal, Height, AO, Emissive, Opacity | OpenGL |
+| Unity Standard | Albedo (+ alpha), Metallic (R) + Smoothness (A), Normal, Occlusion (G), Height (G), Emission | OpenGL |
+| Unity Standard (Specular) | Albedo (+ alpha), Specular (RGB) + Smoothness (A), Normal, Occlusion (G), Height (G), Emission | OpenGL |
+| Unity Mask Map (URP/HDRP) | Base Map (+ alpha), Mask Map (Metal R, AO G, Smoothness A), Normal, Height, Emission | OpenGL |
+| Unreal | Base Color, Metallic, Roughness, Normal, AO, Height, Emissive, Opacity | DirectX |
+| Unreal Packed | Base Color, ORM (AO R, Roughness G, Metal B), Normal, Height, Emissive, Opacity | DirectX |
+| Rust Standard | `_bc`, `_mg` (Metal RGB, Gloss A), `_nrm`, `_ao`, `_disp`, `_em`, `_a` | OpenGL |
+| Rust Standard (Spec/Gloss) | `_bc` (diffuse), `_sg` (Specular RGB, Gloss A), `_nrm`, `_ao`, `_disp`, `_em`, `_a` | OpenGL |
+
+Spec/gloss sets are converted to metal/rough inside Blender using the Khronos glTF conversion, so they shade the same as their metal/rough equivalent.
+
+### Gloss curves
+
+Tools store gloss in different ways. Each preset has a `gloss_curve` (`LINEAR`, `SQUARED` or `SQRT`). To find the one your exporter uses, export the same texture set once with a plain roughness map and once with the packed gloss map, then run:
+
+    blender -b --factory-startup --python tools/calibrate_gloss.py -- Crate_Roughness.png Crate_mg.tga
+
+It compares every pixel and prints the best-fitting curve.
 
 ## Requirements
 

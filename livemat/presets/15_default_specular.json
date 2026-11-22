@@ -1,0 +1,58 @@
+{
+  "schema": 1,
+  "id": "default_specular",
+  "name": "Default Specular",
+  "description": "One file per map, as exported by Substance 3D Painter's PBR Specular Glossiness template.",
+  "normal_format": "OPENGL",
+  "gloss_curve": "LINEAR",
+  "slots": [
+    {
+      "id": "diffuse",
+      "label": "Diffuse",
+      "suffixes": ["diffuse", "albedo", "color", "col"],
+      "channels": {"RGB": "diffuse"}
+    },
+    {
+      "id": "specular",
+      "label": "Specular",
+      "suffixes": ["specular", "spec", "spc"],
+      "channels": {"RGB": "specular"}
+    },
+    {
+      "id": "glossiness",
+      "label": "Glossiness",
+      "suffixes": ["glossiness", "gloss", "gls"],
+      "channels": {"R": "gloss"}
+    },
+    {
+      "id": "normal",
+      "label": "Normal",
+      "suffixes": ["normal", "normal_opengl", "normalgl", "nrm", "nor", "n"],
+      "channels": {"RGB": "normal"}
+    },
+    {
+      "id": "ao",
+      "label": "Ambient Occlusion",
+      "suffixes": ["ambientocclusion", "ambient_occlusion", "mixed_ao", "occlusion", "ao"],
+      "channels": {"R": "ao"}
+    },
+    {
+      "id": "height",
+      "label": "Height",
+      "suffixes": ["height", "displacement", "disp", "hgt"],
+      "channels": {"R": "height"}
+    },
+    {
+      "id": "emission",
+      "label": "Emissive",
+      "suffixes": ["emissive", "emission", "emit"],
+      "channels": {"RGB": "emission"}
+    },
+    {
+      "id": "opacity",
+      "label": "Opacity",
+      "suffixes": ["opacity", "alpha", "transparency"],
+      "channels": {"R": "alpha"}
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "id": "unity_standard_specular",
+  "name": "Unity Standard (Specular)",
+  "description": "Built-in Render Pipeline Standard shader, specular setup: smoothness in the Specular map's alpha.",
+  "normal_format": "OPENGL",
+  "gloss_curve": "LINEAR",
+  "slots": [
+    {
+      "id": "albedo",
+      "label": "Albedo",
+      "suffixes": ["albedotransparency", "albedo", "diffuse", "maintex", "color", "col"],
+      "channels": {"RGB": "diffuse", "A": "alpha"}
+    },
+    {
+      "id": "specular_smoothness",
+      "label": "Specular",
+      "suffixes": ["specularsmoothness", "specular_smoothness", "specular", "spec"],
+      "channels": {"RGB": "specular", "A": "gloss"}
+    },
+    {
+      "id": "normal",
+      "label": "Normal Map",
+      "suffixes": ["normal", "normalmap", "normal_map", "nrm", "n"],
+      "channels": {"RGB": "normal"}
+    },
+    {
+      "id": "occlusion",
+      "label": "Occlusion",
+      "suffixes": ["occlusion", "ambientocclusion", "ao"],
+      "channels": {"G": "ao"}
+    },
+    {
+      "id": "height",
+      "label": "Height Map",
+      "suffixes": ["height", "parallax", "heightmap"],
+      "channels": {"G": "height"}
+    },
+    {
+      "id": "emission",
+      "label": "Emission",
+      "suffixes": ["emission", "emissive"],
+      "channels": {"RGB": "emission"}
+    }
+  ]
+}

@@ -25,7 +25,17 @@ class BuiltinPresetTest(unittest.TestCase):
         loaded = presets.load_builtin_presets()
         self.assertEqual(
             list(loaded),
-            ["default_metal_rough", "unity_standard", "unity_mask_map", "unreal", "unreal_packed"],
+            [
+                "default_metal_rough",
+                "default_specular",
+                "unity_standard",
+                "unity_standard_specular",
+                "unity_mask_map",
+                "unreal",
+                "unreal_packed",
+                "rust_standard",
+                "rust_standard_specular",
+            ],
         )
         for preset in loaded.values():
             self.assertTrue(preset.builtin)
@@ -78,6 +88,18 @@ class ValidationTest(unittest.TestCase):
     def test_rejects_rgb_mixed_with_single_channels(self):
         slots = [{"id": "c", "suffixes": ["c"], "channels": {"RGB": "base_color", "R": "ao"}}]
         self.assertRejects(variant(slots=slots), "mixes RGB")
+
+    def test_rejects_mixed_workflows(self):
+        slots = VALID["slots"] + [{"id": "s", "suffixes": ["s"], "channels": {"RGB": "specular"}}]
+        self.assertRejects(variant(slots=slots), "mixes spec/gloss")
+
+    def test_specular_preset_flag(self):
+        loaded = presets.load_builtin_presets()
+        self.assertTrue(loaded["rust_standard_specular"].is_specular)
+        self.assertFalse(loaded["rust_standard"].is_specular)
+
+    def test_rejects_unknown_gloss_curve(self):
+        self.assertRejects(variant(gloss_curve="CUBIC"), "gloss_curve")
 
     def test_rejects_repeated_label(self):
         slots = [
