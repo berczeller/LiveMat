@@ -7,7 +7,7 @@ import os
 import bpy
 from bpy.props import EnumProperty, IntProperty, StringProperty
 
-from . import registry
+from . import refresh, registry
 from .build import material as builder
 from .core import naming, scanner
 
@@ -91,15 +91,17 @@ def build_item(props, item, *, create):
         material = bpy.data.materials.new(item.name)
         item.material = material
     preset = registry.get(props.scanned_preset)
+    refresh.set_cleared(material, ())
     builder.build_material(
         material, item.texture_set(), preset, rebuild=props.rebuild, folder=props.scanned_folder
     )
+    material["livemat_recursive"] = props.recursive
     return material
 
 
 def _livemat_material(name):
     material = bpy.data.materials.get(name)
-    if material is None or not material.get("livemat_preset"):
+    if material is None or material.library is not None or not material.get("livemat_preset"):
         return None, None
     return material, registry.get(material["livemat_preset"])
 
@@ -151,7 +153,7 @@ class LIVEMAT_OT_build(bpy.types.Operator):
             try:
                 if build_item(props, item, create=create):
                     built += 1
-            except RuntimeError as error:  # a file vanished or can't be read
+            except (RuntimeError, TypeError) as error:  # unreadable file, linked material, odd color config
                 failed.append(f"{item.name}: {error}")
 
         for message in failed:
@@ -178,7 +180,7 @@ class LIVEMAT_OT_assign(bpy.types.Operator):
             return {"CANCELLED"}
         try:
             material = build_item(props, props.sets[self.index], create=True)
-        except RuntimeError as error:
+        except (RuntimeError, TypeError) as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
 
@@ -212,7 +214,7 @@ class LIVEMAT_OT_load_slot(bpy.types.Operator):
         if material is None:
             return {"CANCELLED"}
         current = builder.texture_set_from_material(material).files.get(self.slot)
-        start = current or material.get("livemat_folder", "")
+        start = current or builder.material_folder(material) or ""
         if start:
             self.filepath = start if current else os.path.join(start, "")
         context.window_manager.fileselect_add(self)
@@ -234,10 +236,11 @@ class LIVEMAT_OT_load_slot(bpy.types.Operator):
         else:
             texture_set.udim_slots.discard(self.slot)
         try:
-            builder.build_material(material, texture_set, preset, folder=material.get("livemat_folder"))
-        except RuntimeError as error:
+            builder.build_material(material, texture_set, preset, folder=builder.material_folder(material))
+        except (RuntimeError, TypeError) as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
+        refresh.set_cleared(material, refresh.cleared_slots(material) - {self.slot})
         return {"FINISHED"}
 
 
@@ -254,10 +257,16 @@ class LIVEMAT_OT_clear_slot(bpy.types.Operator):
         material, preset = _livemat_material(self.material)
         if material is None or preset is None:
             return {"CANCELLED"}
+        node = builder.livemat_texture_nodes(material).get(self.slot)
+        if node is not None:  # removed outright, or a generated image would be kept
+            material.node_tree.nodes.remove(node)
         texture_set = builder.texture_set_from_material(material)
-        texture_set.files.pop(self.slot, None)
-        texture_set.udim_slots.discard(self.slot)
-        builder.build_material(material, texture_set, preset, folder=material.get("livemat_folder"))
+        try:
+            builder.build_material(material, texture_set, preset, folder=builder.material_folder(material))
+        except (RuntimeError, TypeError) as error:
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        refresh.set_cleared(material, refresh.cleared_slots(material) | {self.slot})
         return {"FINISHED"}
 
 
@@ -275,18 +284,57 @@ class LIVEMAT_OT_switch_preset(bpy.types.Operator):
         preset = registry.get(self.preset)
         if material is None or preset is None:
             return {"CANCELLED"}
-        folder = material.get("livemat_folder")
+        folder = builder.material_folder(material)
         if not folder or not os.path.isdir(folder):
             self.report({"ERROR"}, f"{material.name} doesn't remember its texture folder. Build it from the LiveMat panel")
             return {"CANCELLED"}
         key = material.get("livemat_key") or naming.asset_key(material.name)
-        result = scanner.scan_folder(folder, preset)
+        result = scanner.scan_folder(folder, preset, recursive=material.get("livemat_recursive", True))
         texture_set = next((s for s in result.sets if s.key == key), None)
         if texture_set is None:
             self.report({"ERROR"}, f"No textures for {material.get('livemat_set', material.name)} follow {preset.name}")
             return {"CANCELLED"}
-        builder.build_material(material, texture_set, preset, folder=folder)
+        refresh.set_cleared(material, ())
+        try:
+            builder.build_material(material, texture_set, preset, folder=folder)
+        except (RuntimeError, TypeError) as error:
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
         self.report({"INFO"}, f"{material.name} now uses {preset.name}")
+        return {"FINISHED"}
+
+
+class LIVEMAT_OT_refresh(bpy.types.Operator):
+    bl_idname = "livemat.refresh"
+    bl_label = "Refresh"
+    bl_description = (
+        "Reload every LiveMat texture from disk and add maps that appeared in the material folders"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, _context):
+        materials = refresh.livemat_materials()
+        if not materials:
+            self.report({"INFO"}, "No LiveMat materials in this file")
+            return {"CANCELLED"}
+        updated, missing = 0, 0
+        for material in materials:
+            try:
+                rebuilt, gone = refresh.update_material(material)
+            except (RuntimeError, TypeError) as error:
+                self.report({"WARNING"}, f"{material.name}: {error}")
+                continue
+            updated += rebuilt
+            missing += len(gone)
+        reloaded = refresh.reload_images(refresh.livemat_images(materials))
+        refresh.redraw_all()
+        message = f"Reloaded {plural(reloaded, 'texture')}"
+        if updated:
+            message += f", updated {plural(updated, 'material')}"
+        if missing:
+            self.report({"WARNING"}, f"{message}. {plural(missing, 'file')} missing on disk")
+        else:
+            self.report({"INFO"}, message)
         return {"FINISHED"}
 
 
@@ -338,6 +386,7 @@ register, unregister = bpy.utils.register_classes_factory(
         LIVEMAT_OT_load_slot,
         LIVEMAT_OT_clear_slot,
         LIVEMAT_OT_switch_preset,
+        LIVEMAT_OT_refresh,
         LIVEMAT_OT_authoring_view,
     )
 )

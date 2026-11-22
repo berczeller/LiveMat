@@ -47,8 +47,7 @@ def ensure_group(preset):
     group = find_group(preset.id)
     if group is not None and group.get("livemat_stamp") == stamp:
         return group
-    group = _fresh_group(group, GROUP_PREFIX + preset.name)
-    _build(group, preset)
+    group = _fresh_group(group, GROUP_PREFIX + preset.name, lambda g: _build(g, preset))
     group["livemat_preset"] = preset.id
     group["livemat_stamp"] = stamp
     return group
@@ -63,8 +62,7 @@ def ensure_specgloss_group():
     group = _find(lambda g: g.get("livemat_helper") == "specgloss")
     if group is not None and group.get("livemat_stamp") == SPECGLOSS_VERSION:
         return group
-    group = _fresh_group(group, SPECGLOSS_NAME)
-    _build_specgloss(group)
+    group = _fresh_group(group, SPECGLOSS_NAME, _build_specgloss)
     group["livemat_helper"] = "specgloss"
     group["livemat_stamp"] = SPECGLOSS_VERSION
     return group
@@ -81,12 +79,70 @@ def _find(predicate):
     )
 
 
-def _fresh_group(group, name):
+def _fresh_group(group, name, build):
+    """Create or rebuild `group` with `build(group)`.
+
+    Rebuilding the interface gives every socket a new identifier, which drops
+    the links on each node using the group. Those links and the parameter
+    values are saved by socket name first and put back afterwards.
+    """
     if group is None:
-        return bpy.data.node_groups.new(name, "ShaderNodeTree")
+        group = bpy.data.node_groups.new(name, "ShaderNodeTree")
+        build(group)
+        return group
+    users = _save_users(group)
     group.nodes.clear()
     group.interface.clear()
+    build(group)
+    _restore_users(users)
     return group
+
+
+def _save_users(group):
+    trees = [m.node_tree for m in bpy.data.materials if m.library is None and m.node_tree is not None]
+    trees += [g for g in bpy.data.node_groups if g.library is None and g != group]
+    parameters = {name for name, *_rest in PARAMETERS}
+    users = []
+    for tree in trees:
+        for node in tree.nodes:
+            if node.bl_idname != "ShaderNodeGroup" or node.node_tree != group:
+                continue
+            links_in = [
+                (l.from_node.name, l.from_socket.identifier, l.to_socket.name)
+                for l in tree.links
+                if l.to_node == node
+            ]
+            links_out = [
+                (l.from_socket.name, l.to_node.name, l.to_socket.identifier)
+                for l in tree.links
+                if l.from_node == node
+            ]
+            values = {
+                s.name: s.default_value
+                for s in node.inputs
+                if s.name in parameters and not s.is_linked
+            }
+            users.append((tree, node.name, links_in, links_out, values))
+    return users
+
+
+def _restore_users(users):
+    for tree, node_name, links_in, links_out, values in users:
+        node = tree.nodes.get(node_name)
+        if node is None:
+            continue
+        for from_name, from_id, to_name in links_in:
+            source, target = tree.nodes.get(from_name), node.inputs.get(to_name)
+            if source is not None and target is not None:
+                tree.links.new(_socket(source.outputs, from_id), target)
+        for from_name, to_name, to_id in links_out:
+            source, target = node.outputs.get(from_name), tree.nodes.get(to_name)
+            if source is not None and target is not None:
+                tree.links.new(source, _socket(target.inputs, to_id))
+        for name, value in values.items():
+            socket = node.inputs.get(name)
+            if socket is not None:
+                socket.default_value = value
 
 
 def _socket(sockets, identifier):

@@ -31,7 +31,7 @@ class LiveMatSet(bpy.types.PropertyGroup):
         type=bpy.types.Material,
         name="Material",
         description="Material to build. Empty creates one named after the set",
-        poll=lambda _self, material: not material.is_grease_pencil,
+        poll=lambda _self, material: not material.is_grease_pencil and material.library is None,
     )
     files: CollectionProperty(type=LiveMatSlotFile)
     duplicates: IntProperty(description="Files that lost to another file for the same slot")
@@ -58,6 +58,12 @@ class LiveMatScene(bpy.types.PropertyGroup):
         name="Rebuild",
         default=False,
         description="Clear each material's nodes before building, instead of keeping existing ones aside",
+    )
+
+    auto_reload: BoolProperty(
+        name="Auto Reload",
+        default=False,
+        description="Reload LiveMat textures when they change on disk, checking every second",
     )
 
     sets: CollectionProperty(type=LiveMatSet)

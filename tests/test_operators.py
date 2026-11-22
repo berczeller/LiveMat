@@ -75,7 +75,7 @@ class BuildTest(OperatorTestBase):
         crate = bpy.data.materials.new("Crate")
         bpy.ops.livemat.build()  # scans first, since nothing was scanned yet
         self.assertEqual(crate["livemat_preset"], "default_metal_rough")
-        self.assertEqual(crate["livemat_folder"], self.props.scanned_folder)
+        self.assertEqual(builder.material_folder(crate), os.path.normpath(self.props.scanned_folder))
         self.assertIn("Barrel", bpy.data.materials)
 
     def test_create_missing_off_skips_new_sets(self):

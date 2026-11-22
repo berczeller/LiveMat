@@ -151,7 +151,10 @@ class _MainPanel(_Sidebar):
         col.prop(props, "preset", text="")
         row = layout.row(align=True)
         row.scale_y = 1.3
-        row.operator("livemat.scan", icon="FILE_REFRESH")
+        row.operator("livemat.scan", icon="VIEWZOOM")
+        row = layout.row(align=True)
+        row.operator("livemat.refresh", icon="FILE_REFRESH")
+        row.prop(props, "auto_reload", toggle=True, icon="TIME")
 
         if not props.sets:
             if props.scanned_folder:
