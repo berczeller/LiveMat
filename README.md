@@ -2,7 +2,7 @@
 
 ### A Blender add-on that turns a folder of PBR textures into ready-to-use materials.
 
-![Blender](https://img.shields.io/badge/Blender-5.2%2B-7fd3ff?style=flat-square) ![Type](https://img.shields.io/badge/Blender-extension-ff8fa3?style=flat-square) ![Python](https://img.shields.io/badge/Python-3.13-c4a7ff?style=flat-square) ![Version](https://img.shields.io/badge/version-0.1.0-ffc36b?style=flat-square) ![License](https://img.shields.io/badge/license-GPL--3.0--or--later-6fd6a0?style=flat-square)
+![Blender](https://img.shields.io/badge/Blender-5.2%2B-7fd3ff?style=flat-square) ![Type](https://img.shields.io/badge/Blender-extension-ff8fa3?style=flat-square) ![Python](https://img.shields.io/badge/Python-3.13-c4a7ff?style=flat-square) ![Version](https://img.shields.io/badge/version-0.1.1-ffc36b?style=flat-square) ![License](https://img.shields.io/badge/license-GPL--3.0--or--later-6fd6a0?style=flat-square)
 
 ---
 
@@ -44,10 +44,10 @@ Spec/gloss sets are converted to metal/rough inside Blender using the Khronos gl
 
 ## Install
 
-1. Download `LiveMat-0.1.0.zip` from the [latest release](https://github.com/berczeller/LiveMat/releases/latest).
+1. Download `LiveMat-0.1.1.zip` from the [latest release](https://github.com/berczeller/LiveMat/releases/latest).
 2. In Blender, open **Edit > Preferences > Get Extensions**, then **Install from Disk** in the top-right menu, and pick the zip.
 
-GitHub's automatic "Source code" archives are not installable add-ons. Use the `LiveMat-0.1.0.zip` asset.
+GitHub's automatic "Source code" archives are not installable add-ons. Use the `LiveMat-0.1.1.zip` asset.
 
 ## Usage
 
