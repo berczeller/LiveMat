@@ -7,7 +7,7 @@ import os
 import bpy
 from bpy.props import EnumProperty, IntProperty, StringProperty
 
-from . import actions, refresh, registry, thumbs
+from . import actions, refresh, registry, thumbs, watch
 from .build import material as builder
 from .build import tangents
 from .core import naming, scanner
@@ -327,6 +327,7 @@ class LIVEMAT_OT_refresh(bpy.types.Operator):
                 no_tangents.update(tangents.update_users(material))
         images = refresh.livemat_images(materials)
         reloaded = refresh.reload_images(images)
+        watch.clear_stale()
         thumbs.forget(bpy.path.abspath(i.filepath) for i in images)
         refresh.redraw_all()
         for name in sorted(no_tangents):

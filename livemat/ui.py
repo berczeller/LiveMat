@@ -6,7 +6,7 @@ the Shader Editor sidebar and Material Properties."""
 
 import bpy
 
-from . import icons, registry, thumbs
+from . import icons, registry, thumbs, watch
 from .build import material as builder
 from .build import nodegroup
 from .operators import plural
@@ -97,8 +97,12 @@ def draw_source(layout, props):
     row.prop(props, "recursive", text="Subfolders", toggle=True, icon="FILE_FOLDER")
     row.prop(props, "create_missing", text="Create", toggle=True, icon="ADD")
     row.prop(props, "rebuild", text="Rebuild", toggle=True, icon="TRASH")
+    stale = watch.stale_count()
     row = body.row(align=True)
-    row.operator("livemat.refresh", icon="FILE_REFRESH")
+    refresh_button = row.row(align=True)
+    # Point at Refresh when exports changed textures Blender still shows the old version of.
+    refresh_button.active_default = bool(stale) and not props.auto_reload
+    refresh_button.operator("livemat.refresh", icon="FILE_REFRESH")
     row.prop(props, "auto_reload", text="Auto", toggle=True, icon="TIME")
     row.operator(
         "livemat.authoring_view",
@@ -106,6 +110,10 @@ def draw_source(layout, props):
         icon="HIDE_OFF",
         depress=props.authoring_view,
     )
+    if stale and not props.auto_reload:
+        hint = body.row()
+        hint.alert = True
+        hint.label(text=f"{plural(stale, 'texture')} changed on disk", icon="ERROR")
     end_section(body)
 
 

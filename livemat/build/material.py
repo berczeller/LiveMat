@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 
 import bpy
 
+from .. import stamps
 from ..core import naming
 from ..core.presets import DETAIL_SLOT_ID
 from ..core.scanner import TextureSet
@@ -324,6 +325,7 @@ def load_image(path, slot, *, udim=False):
     _set_colorspace(image, slot.colorspace)
     # Channel packed keeps Blender from mixing a data alpha (gloss, smoothness) into RGB.
     image.alpha_mode = alpha_mode
+    stamps.remember(image)
     return image
 
 

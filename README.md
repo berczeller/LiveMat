@@ -66,7 +66,7 @@ The **Material** panel (in the sidebar and under **Material Properties**) shows 
 - Tint, Metallic, Smoothness and the strength sliders sit under the map they affect. Tint is white by default, like Unity's albedo color.
 - The preset menu at the top rebuilds the material with another preset.
 
-After exporting from Painter again, press **Refresh**, or turn on **Auto** and keep painting. Auto Reload checks the files every second and waits until a file stops changing before reloading it. New maps only show up with **Refresh**.
+Blender never re-reads an image by itself, so after exporting from Painter again, press **Refresh**, or turn on **Auto** and keep painting. Auto Reload checks the files every second, waits until a file stops changing, and also catches up on exports made while it was off. With Auto off, the panel warns when textures changed on disk and highlights **Refresh**. New maps only show up with **Refresh**.
 
 **Neutral View** switches to a neutral view transform and keeps Material Preview's lighting fixed in the world, as game engines do. Press it again to get your settings back.
 

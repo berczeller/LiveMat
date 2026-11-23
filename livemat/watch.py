@@ -1,36 +1,33 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 Tom Berczeller
 
-"""Auto Reload: poll LiveMat textures and reload the ones that change on disk."""
+"""Poll LiveMat textures for changes on disk.
 
-import os
+With Auto Reload on, changed textures reload by themselves. With it off,
+the panel lists how many are out of date so Refresh can be pressed.
+"""
+
 import traceback
 
 import bpy
 from bpy.app.handlers import persistent
 
-from . import refresh
+from . import refresh, stamps
 
 INTERVAL = 1.0  # seconds between checks
 
-_seen = {}  # image name -> file stamp last loaded
 _pending = {}  # image name -> new stamp waiting one more check
+_stale = []  # names of images whose file changed since they were loaded
 
 
-def _file_stamp(path):
-    try:
-        info = os.stat(path)
-    except OSError:
-        return None
-    return (info.st_mtime_ns, info.st_size)
+def stale_count():
+    return len(_stale)
 
 
-def image_stamp(image):
-    """Modification time and size of the image's file, or of every tile for UDIMs."""
-    path = bpy.path.abspath(image.filepath, library=image.library)
-    if image.source == "TILED":
-        return tuple(_file_stamp(path.replace("<UDIM>", str(t.number))) for t in image.tiles)
-    return _file_stamp(path)
+def clear_stale():
+    """After a Refresh everything is current again; don't wait for the next check to say so."""
+    _stale.clear()
+    _pending.clear()
 
 
 def _busy():
@@ -45,31 +42,39 @@ def _busy():
 
 def check(scene):
     """One polling pass. Returns the names of the images it reloaded."""
-    if scene is None or not scene.livemat.auto_reload:
-        _seen.clear()
+    if scene is None:
+        return []
+    images = refresh.livemat_images()
+    for image in images:
+        stamps.baseline(image)
+    changed = [image for image in images if stamps.changed(image)]
+
+    before = list(_stale)
+    _stale[:] = [image.name for image in changed]
+    if _stale != before:
+        refresh.redraw_all()
+
+    if not scene.livemat.auto_reload:
         _pending.clear()
         return []
     if _busy():
         return []  # reloading images under a running render or bake is unsafe
 
+    # Exporters write big files over several moments. Wait until a change
+    # looks the same on two checks in a row before reloading. This also
+    # catches files that changed while Auto Reload was off.
     reload = []
-    for image in refresh.livemat_images():
-        stamp = image_stamp(image)
-        name = image.name
-        if name not in _seen:
-            _seen[name] = stamp
-        elif stamp != _seen[name] and stamp is not None:
-            # Exporters write big files over several moments. Wait until a
-            # change looks the same on two checks in a row before reloading.
-            if _pending.get(name) == stamp:
-                reload.append(image)
-                _seen[name] = stamp
-                del _pending[name]
-            else:
-                _pending[name] = stamp
+    for image in changed:
+        stamp = stamps.image_stamp(image)
+        if _pending.get(image.name) == stamp:
+            reload.append(image)
+            del _pending[image.name]
+        else:
+            _pending[image.name] = stamp
 
     if reload:
         refresh.reload_images(reload)
+        _stale[:] = [name for name in _stale if name not in {i.name for i in reload}]
         refresh.redraw_all()
     return [image.name for image in reload]
 
@@ -84,9 +89,10 @@ def _tick():
 
 @persistent
 def _forget(_dummy=None):
-    # A newly opened file has its own images.
-    _seen.clear()
+    # A newly opened file loads its images fresh from disk.
+    stamps.forget_all()
     _pending.clear()
+    _stale.clear()
 
 
 def register():

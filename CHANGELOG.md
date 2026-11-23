@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here. The format follows Keep a Changelog and the project uses Semantic Versioning.
 
+## [Unreleased]
+
+### Fixed
+- Textures exported again while Blender was open kept showing their old version with no hint. The panel now warns when textures changed on disk, and turning on Auto Reload reloads them.
+
 ## [0.1.0] - 2026-11-22
 
 First release.

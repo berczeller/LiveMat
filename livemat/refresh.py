@@ -7,7 +7,7 @@ import os
 
 import bpy
 
-from . import registry
+from . import registry, stamps
 from .build import material as builder
 from .build import nodegroup
 from .core import scanner
@@ -102,6 +102,7 @@ def reload_images(images):
         if image.source not in {"FILE", "TILED"}:
             continue
         image.reload()
+        stamps.remember(image)
         if image.preview is not None:
             image.preview.reload()
         count += 1

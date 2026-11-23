@@ -85,3 +85,38 @@ class AutoReloadTest(RefreshTestBase):
         self.assertEqual(watch.check(self.scene), ["Crate_BaseColor.png"])
         self.assertNotEqual(self.base_color_red(), before)
         self.assertEqual(watch.check(self.scene), [])
+
+
+class StaleTextureTest(RefreshTestBase):
+    def setUp(self):
+        super().setUp()
+        watch.clear_stale()  # keep the stamps the build recorded
+        self.scene = bpy.context.scene
+        self.props.auto_reload = False
+
+    def tearDown(self):
+        self.props.auto_reload = False
+        watch._forget()
+        super().tearDown()
+
+    def test_changed_files_are_flagged_and_refresh_clears_them(self):
+        watch.check(self.scene)
+        self.assertEqual(watch.stale_count(), 0)
+        self.repaint_base_color((20, 120, 60))
+        watch.check(self.scene)
+        self.assertEqual(watch.stale_count(), 1)
+        bpy.ops.livemat.refresh()
+        self.assertEqual(watch.stale_count(), 0)
+        watch.check(self.scene)
+        self.assertEqual(watch.stale_count(), 0)
+
+    def test_turning_auto_on_catches_up(self):
+        # The export happened while Auto Reload was off, before it was switched on.
+        before = self.base_color_red()
+        self.repaint_base_color((20, 120, 60))
+        watch.check(self.scene)
+        self.props.auto_reload = True
+        self.assertEqual(watch.check(self.scene), [])  # settling
+        self.assertEqual(watch.check(self.scene), ["Crate_BaseColor.png"])
+        self.assertNotEqual(self.base_color_red(), before)
+        self.assertEqual(watch.stale_count(), 0)
