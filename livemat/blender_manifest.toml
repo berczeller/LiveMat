@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "livemat"
-version = "0.1.1"
+version = "0.1.2"
 name = "LiveMat"
 tagline = "Build Blender materials from PBR texture folders"
 maintainer = "Tom Berczeller"
