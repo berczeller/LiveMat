@@ -85,11 +85,14 @@ def materials_by_key():
     return found
 
 
-def scan_is_stale(props):
-    return (
-        props.scanned_preset != props.preset
-        or props.scanned_folder != bpy.path.abspath(props.folder)
-    )
+def rescan_for(props, index):
+    """Scan again so files exported since the last scan are used, and return the set
+    that was at `index` (found by name, since new sets can shift the list), or None."""
+    key = props.sets[index].key if 0 <= index < len(props.sets) else None
+    scan(props)
+    if key is None:
+        return None
+    return next((item for item in props.sets if item.key == key), None)
 
 
 def build_item(props, item, *, create):
@@ -142,17 +145,18 @@ class LIVEMAT_OT_build(bpy.types.Operator):
 
     def execute(self, context):
         props = context.scene.livemat
-        if scan_is_stale(props) or not props.sets:
-            try:
-                scan(props)
-            except ScanError as error:
-                self.report({"ERROR"}, str(error))
-                return {"CANCELLED"}
+        # Always scan first: building from an old scan would drop maps exported since.
+        try:
+            item = rescan_for(props, self.index)
+        except ScanError as error:
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
 
         if self.index >= 0:
-            if self.index >= len(props.sets):
+            if item is None:
+                self.report({"ERROR"}, "That texture set is no longer in the folder")
                 return {"CANCELLED"}
-            items, create = [props.sets[self.index]], True
+            items, create = [item], True
         else:
             items, create = [i for i in props.sets if i.include], props.create_missing
 
@@ -184,10 +188,16 @@ class LIVEMAT_OT_assign(bpy.types.Operator):
 
     def execute(self, context):
         props = context.scene.livemat
-        if not 0 <= self.index < len(props.sets):
+        try:
+            item = rescan_for(props, self.index)
+        except ScanError as error:
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        if item is None:
+            self.report({"ERROR"}, "That texture set is no longer in the folder")
             return {"CANCELLED"}
         try:
-            material = build_item(props, props.sets[self.index], create=True)
+            material = build_item(props, item, create=True)
         except (RuntimeError, TypeError) as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
@@ -331,7 +341,7 @@ class LIVEMAT_OT_refresh(bpy.types.Operator):
         thumbs.forget(bpy.path.abspath(i.filepath) for i in images)
         refresh.redraw_all()
         for name in sorted(no_tangents):
-            self.report({"WARNING"}, f"{name} has no UVs or uses n-gons, so it keeps Blender tangents")
+            self.report({"WARNING"}, f"{name} has no UV map, so Unity tangents can't be computed for it")
         message = f"Reloaded {plural(reloaded, 'texture')}"
         if updated:
             message += f", updated {plural(updated, 'material')}"

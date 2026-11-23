@@ -9,9 +9,12 @@ with Blender's version, so LiveMat stores Unity's on the mesh as a hidden
 corner attribute that the node group reads back.
 """
 
+import bmesh
 import bpy
 
 from .nodegroup import BITANGENT_ATTRIBUTE
+
+_CORNER = "livemat_corner"  # temporary: each triangulated corner's original corner index
 
 
 def mesh_users(material):
@@ -25,18 +28,60 @@ def mesh_users(material):
     return list(meshes.values())
 
 
+def _bitangents(mesh, uv_name):
+    """Flat list of MikkTSpace bitangents (x, y, z per corner) for a mesh of triangles and quads."""
+    mesh.calc_tangents(uvmap=uv_name)
+    values = [0.0] * (len(mesh.loops) * 3)
+    mesh.loops.foreach_get("bitangent", values)
+    mesh.free_tangents()
+    return values
+
+
+def _bitangents_via_triangles(mesh, uv_name):
+    """Bitangents for a mesh with n-gons, computed on a triangulated copy.
+
+    Tangents need triangles or quads. Unity triangulates every mesh on import
+    anyway, so a triangulated copy gives the bitangents Unity would use. Each
+    triangle corner remembers which corner of the original it came from.
+    """
+    bm = bmesh.new()
+    try:
+        bm.from_mesh(mesh)
+        layer = bm.loops.layers.int.new(_CORNER)
+        index = 0
+        for face in bm.faces:
+            for loop in face.loops:
+                loop[layer] = index
+                index += 1
+        ngons = [face for face in bm.faces if len(face.verts) > 4]
+        bmesh.ops.triangulate(bm, faces=ngons)
+        temp = bpy.data.meshes.new("LiveMat Tangents")
+        bm.to_mesh(temp)
+    finally:
+        bm.free()
+    try:
+        temp.uv_layers.active = temp.uv_layers[uv_name]
+        values = _bitangents(temp, uv_name)
+        origins = [0] * len(temp.loops)
+        temp.attributes[_CORNER].data.foreach_get("value", origins)
+    finally:
+        bpy.data.meshes.remove(temp)
+    result = [0.0] * (len(mesh.loops) * 3)
+    for corner, origin in enumerate(origins):
+        # An n-gon corner can appear in several triangles; they share a vertex and UV, so any will do.
+        result[origin * 3:origin * 3 + 3] = values[corner * 3:corner * 3 + 3]
+    return result
+
+
 def write_bitangents(mesh):
-    """Store MikkTSpace bitangents per face corner. Returns False when the mesh can't have them."""
+    """Store MikkTSpace bitangents per face corner. Returns False when the mesh has no UVs."""
     uv = mesh.uv_layers.active_render or mesh.uv_layers.active
     if uv is None or not mesh.loops:
         return False
     try:
-        mesh.calc_tangents(uvmap=uv.name)
+        values = _bitangents(mesh, uv.name)
     except RuntimeError:  # n-gons: tangents need triangles or quads
-        return False
-    values = [0.0] * (len(mesh.loops) * 3)
-    mesh.loops.foreach_get("bitangent", values)
-    mesh.free_tangents()
+        values = _bitangents_via_triangles(mesh, uv.name)
 
     attribute = mesh.attributes.get(BITANGENT_ATTRIBUTE)
     if attribute is not None and (attribute.data_type != "FLOAT_VECTOR" or attribute.domain != "CORNER"):

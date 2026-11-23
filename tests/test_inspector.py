@@ -157,3 +157,28 @@ class TgaThumbnailTest(OperatorTestBase):
         self.assertEqual(tuple(preview.image_size), (thumbs.IMAGE_SIZE, thumbs.IMAGE_SIZE // 2))
         self.assertEqual(tuple(preview.image_pixels_float[:4]), (1.0, 0.0, 0.0, 1.0))
         self.assertFalse(any("red_bc" in i.name for i in bpy.data.images))
+
+
+class NgonTangentsTest(OperatorTestBase):
+    def test_ngon_mesh_gets_bitangents(self):
+        from livemat.build import tangents
+
+        bpy.ops.mesh.primitive_circle_add(vertices=12, fill_type="NGON")
+        mesh = bpy.context.active_object.data
+        self.assertTrue(any(p.loop_total > 4 for p in mesh.polygons))
+        self.assertTrue(tangents.write_bitangents(mesh))
+        attribute = mesh.attributes[nodegroup.BITANGENT_ATTRIBUTE]
+        self.assertEqual(len(attribute.data), len(mesh.loops))
+        # A flat disc mapped from the top: every bitangent points along +Y.
+        for item in attribute.data:
+            self.assertAlmostEqual(item.vector[1], 1.0, places=3)
+        self.assertEqual([m.name for m in bpy.data.meshes if m.name.startswith("LiveMat Tangents")], [])
+
+
+class RescanTest(OperatorTestBase):
+    def test_build_picks_up_maps_exported_after_the_scan(self):
+        make_texture_set(self.folder, "Crate", METAL_ROUGH)
+        bpy.ops.livemat.scan()
+        write_png(os.path.join(self.folder, "Crate_Emissive.png"), (255, 0, 0))
+        bpy.ops.livemat.build(index=0)
+        self.assertIn("emission", builder.livemat_texture_nodes(bpy.data.materials["Crate"]))

@@ -139,6 +139,12 @@ def picker_set(state, value):
     items = _picker_items.get((material.name, state.slot), ())
     path = next((item[0] for item in items if item[4] == value), None)
     if path is None:
+        # The list changed since the popup was drawn (a new export, another
+        # material's picker): read it again rather than drop the click.
+        items = picker_items(state, None)
+        path = next((item[0] for item in items if item[4] == value), None)
+    if path is None:
+        print(f"LiveMat: the picked texture isn't in {material.name}'s folder any more")
         return
     material, preset = livemat_material(material.name)
     if material is None or preset is None:
@@ -160,4 +166,4 @@ def tangents_changed(state, _context):
     if material.get("livemat_preset"):
         failed = apply_tangents(material)
         for name in failed:
-            print(f"LiveMat: {name} has no UVs or uses n-gons, so it keeps Blender tangents")
+            print(f"LiveMat: {name} has no UV map, so Unity tangents can't be computed for it")

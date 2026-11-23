@@ -74,7 +74,7 @@ Blender never re-reads an image by itself, so after exporting from Painter again
 
 Normal maps are stored relative to the surface's tangent and bitangent. Blender, Unreal and Unity HDRP rebuild the bitangent per pixel; Unity's built-in shaders build it per vertex. A map baked for Unity therefore shades slightly differently in Blender, most visibly on low-poly meshes and stretched UVs.
 
-Set **Normals** to **Unity** in the Material panel to match Unity. LiveMat then stores the per-vertex bitangent in a `.livemat_bitangent` attribute on the meshes using the material (FBX doesn't export it) and reads it back in the shader. Press **Refresh** after editing those meshes. Meshes with n-gons keep Blender's tangents; triangulate them or use quads.
+Set **Normals** to **Unity** in the Material panel to match Unity. LiveMat then stores the per-vertex bitangent in a `.livemat_bitangent` attribute on the meshes using the material (FBX doesn't export it) and reads it back in the shader. Press **Refresh** after editing those meshes. N-gons are triangulated on a temporary copy for this, the way Unity triangulates on import, so the meshes themselves don't change.
 
 In Substance 3D Painter, **Compute tangent space per fragment** decides which convention a bake uses: off matches Unity's built-in shaders, on matches Blender.
 

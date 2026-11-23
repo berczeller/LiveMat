@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. The format follows Keep a Changelog and the project uses Semantic Versioning.
 
+## [Unreleased]
+
+### Fixed
+- Build and Assign to Selected scan the folder again first, so maps exported since the last scan aren't dropped.
+- Meshes with n-gons get Unity tangents too, from a triangulated copy, instead of shading wrong in Unity mode.
+- Picking a texture in the thumbnail picker works even if the folder changed after the picker opened.
+
 ## [0.1.1] - 2026-11-23
 
 ### Fixed
