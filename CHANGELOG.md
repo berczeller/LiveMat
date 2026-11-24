@@ -11,6 +11,7 @@ All notable changes to this project are documented here. The format follows Keep
 - Saved selections that can be selected again and combined.
 - Export checks that make sure engines read the mask as the first vertex color set, with a one-click fix and an FBX round-trip test.
 - Three layer kinds: Fill, Paint (painted with Blender's vertex paint brushes, with live preview) and Generator.
+- Polygon Fill tool: click a polygon or drag a rectangle in the viewport to fill it, by polygon, connected mesh or UV island, with intersection or center hit-testing and visible polygons only. A highlight shows what will be filled.
 - Generators baked from the mesh: Ambient Occlusion, Thickness and Curvature with Cycles, and Edge Wear from face angles. Low, High and Invert remap them live without baking again.
 
 ### Changed

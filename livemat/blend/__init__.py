@@ -3,9 +3,9 @@
 
 """Blend: per-channel RGBA masks on meshes, exported as vertex colors."""
 
-from . import ops, paint, props, ui
+from . import fill_tool, ops, paint, props, ui
 
-_modules = (props, ops, ui, paint)
+_modules = (props, ops, fill_tool, ui, paint)
 
 
 def register():

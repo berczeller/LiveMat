@@ -131,17 +131,27 @@ def draw(layout, context, section, end_section):
 
     # Fill
     body = section(layout, "Fill", "fill")
-    if not editing:
-        hint = body.row()
-        hint.enabled = False
-        hint.label(text="Select vertices, edges or faces in Edit Mode", icon="EDITMODE_HLT")
-    col = body.column()
-    col.enabled = editing
-    row = col.row(align=True)
+    row = body.row(align=True)
     row.prop(tool, "value", slider=True)
     sub = row.row(align=True)
     sub.ui_units_x = 2.6
     sub.label(text=f"{round(tool.value * 255)}")
+    row = body.row(align=True)
+    row.scale_y = 1.3
+    row.operator("livemat.blend_polygon_fill", icon="RESTRICT_SELECT_OFF")
+    row = body.row(align=True)
+    row.prop(tool, "fill_mode", expand=True)
+    row = body.row(align=True)
+    row.prop(tool, "hit_test", expand=True)
+    row.prop(tool, "visible_only", toggle=True, icon="HIDE_OFF")
+    body.separator(factor=0.6)
+    if not editing:
+        hint = body.row()
+        hint.enabled = False
+        hint.label(text="Set and Randomize work on Edit Mode selections", icon="EDITMODE_HLT")
+    col = body.column()
+    col.enabled = editing
+
     row = col.row(align=True)
     row.scale_y = 1.2
     row.operator("livemat.blend_fill", text="Set", icon="BRUSH_DATA").action = "SET"

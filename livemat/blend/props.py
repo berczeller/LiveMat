@@ -172,6 +172,24 @@ class LiveMatBlendTool(bpy.types.PropertyGroup):
     angle_min: FloatProperty(name="Min", default=0.523599, min=0.0, max=3.141593, subtype="ANGLE", description="Smallest bend angle (0 = flat)")
     angle_max: FloatProperty(name="Max", default=3.141593, min=0.0, max=3.141593, subtype="ANGLE", description="Largest bend angle")
     angle_open: BoolProperty(name="Open Edges", description="Also select border edges, which have one face and no angle")
+    fill_mode: EnumProperty(
+        name="Fill By",
+        items=[
+            ("POLYGON", "Polygon", "Fill the polygons you click or drag over", "FACESEL", 0),
+            ("MESH", "Mesh", "Fill every polygon connected to them", "MESH_CUBE", 1),
+            ("UV_ISLAND", "UV Island", "Fill their whole UV islands", "UV", 2),
+        ],
+        default="POLYGON",
+    )
+    hit_test: EnumProperty(
+        name="Hit Test",
+        items=[
+            ("INTERSECT", "Intersect", "A rectangle fills polygons it touches"),
+            ("CENTER", "Center", "A rectangle fills polygons whose center is inside it"),
+        ],
+        default="INTERSECT",
+    )
+    visible_only: BoolProperty(name="Visible Only", default=True, description="A rectangle skips polygons hidden behind others")
     combine: EnumProperty(
         name="Combine",
         items=[

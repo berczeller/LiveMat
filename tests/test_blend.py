@@ -459,3 +459,62 @@ class LayerKindsTest(BlendTestBase):
         self.add("PAINT")
         self.edit_select_faces([0])
         self.assertEqual(bpy.ops.livemat.blend_fill(action="SET"), {"CANCELLED"})
+
+
+class PolygonFillTest(BlendTestBase):
+    def picker(self):
+        from livemat.blend import fill_tool
+
+        return fill_tool.Picker(self.obj)
+
+    def test_ray_picks_the_top_face(self):
+        from mathutils import Vector
+
+        picker = self.picker()
+        index = picker.ray(Vector((0.2, 0.1, 5.0)), Vector((0.0, 0.0, -1.0)))
+        self.assertGreater(self.mesh.polygons[index].normal.z, 0.9)
+
+    def test_islands(self):
+        from livemat.blend import fill_tool
+
+        # Move face 0's UVs away: it becomes its own UV island, still connected in 3D.
+        uv = self.mesh.uv_layers.active.data
+        for corner in self.corners_of_face(0):
+            uv[corner].uv = (uv[corner].uv[0] + 5.0, uv[corner].uv[1])
+        mesh_islands, uv_islands = fill_tool.islands(self.mesh)
+        self.assertEqual(len(set(mesh_islands)), 1)
+        self.assertEqual(sum(1 for island in uv_islands if island == uv_islands[0]), 1)
+        picker = self.picker()
+        self.assertEqual(len(picker.expand([0], "MESH")), 6)
+        self.assertEqual(picker.expand([0], "UV_ISLAND"), {0})
+        self.assertEqual(len(picker.expand([1], "UV_ISLAND")), 5)
+        self.assertEqual(picker.expand([0], "POLYGON"), {0})
+
+    def test_rectangle_hit_tests_and_occlusion(self):
+        from mathutils import Vector
+
+        from livemat.blend import fill_tool
+
+        picker = self.picker()
+        # A top-down orthographic view: x, y in world units are the 2D coordinates.
+        project = lambda point: (point.x, point.y)
+        down = Vector((0.0, 0.0, -1.0))
+        # A small rectangle around the middle holds the top and bottom face centers.
+        center = fill_tool.polygons_in_rectangle(picker, project, (-0.1, -0.1, 0.1, 0.1), "CENTER", False, None, down)
+        self.assertEqual(len(center), 2)
+        visible = fill_tool.polygons_in_rectangle(picker, project, (-0.1, -0.1, 0.1, 0.1), "CENTER", True, None, down)
+        self.assertEqual(len(visible), 1)  # the bottom face is hidden by the top one
+        self.assertGreater(self.mesh.polygons[visible.pop()].normal.z, 0.9)
+        # A rectangle over one corner touches the faces that meet there, but no face center.
+        corner = fill_tool.polygons_in_rectangle(picker, project, (0.9, 0.9, 1.1, 1.1), "INTERSECT", False, None, down)
+        self.assertEqual(len(corner), 4)
+        self.assertEqual(fill_tool.polygons_in_rectangle(picker, project, (0.9, 0.9, 1.1, 1.1), "CENTER", False, None, down), set())
+
+    def test_apply_and_clear(self):
+        from livemat.blend import fill_tool
+
+        fill_tool.apply(self.mesh, {0}, 0.5)
+        values = final_values(self.mesh)
+        self.assertTrue(all(values[i] == 128 for i in self.corners_of_face(0)))
+        fill_tool.apply(self.mesh, {0}, 0.5, clear=True)
+        self.assertEqual(int(final_values(self.mesh).sum()), 0)
