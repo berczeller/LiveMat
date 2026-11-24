@@ -380,3 +380,82 @@ class ReviewRegressionTest(BlendTestBase):
         self.mesh.attributes.new(data.LAYER_PREFIX + "gone", "FLOAT_VECTOR", "CORNER")
         data.composite_mesh(self.mesh)
         self.assertNotIn(data.LAYER_PREFIX + "gone", self.mesh.attributes)
+
+
+class LayerKindsTest(BlendTestBase):
+    def add(self, kind, generator="AO"):
+        if bpy.context.mode != "OBJECT":
+            self.leave_edit()
+        bpy.ops.livemat.blend_layer_add(kind=kind, generator=generator)
+        return self.mesh.livemat_blend.layers_r[0]
+
+    def test_paint_layer_strokes_become_coverage(self):
+        layer = self.add("PAINT")
+        layer.paint_value = 1.0
+        from livemat.blend import paint
+
+        paint.start(bpy.context, self.obj, layer)
+        self.assertEqual(bpy.context.mode, "PAINT_VERTEX")
+        self.assertEqual(self.mesh.color_attributes.active_color_name, data.PAINT)
+        # A brush stroke: white on the corners of face 0.
+        strokes = self.mesh.color_attributes[data.PAINT]
+        for corner in self.corners_of_face(0):
+            strokes.data[corner].color_srgb = (1.0, 1.0, 1.0, 1.0)
+        self.assertTrue(paint.sync(self.mesh))
+        values = final_values(self.mesh)
+        self.assertTrue(all(values[i] == 255 for i in self.corners_of_face(0)))
+        self.assertEqual(self.mesh.color_attributes.active_color_name, data.PAINT)  # still painting there
+        bpy.ops.livemat.blend_paint_done()
+        self.assertEqual(bpy.context.mode, "OBJECT")
+        self.assertNotIn(data.PAINT, self.mesh.color_attributes)
+        self.assertEqual(self.mesh.color_attributes.active_color_name, data.FINAL)
+        self.assertTrue(all(final_values(self.mesh)[i] == 255 for i in self.corners_of_face(0)))
+
+    def test_leaving_vertex_paint_another_way_keeps_strokes(self):
+        layer = self.add("PAINT")
+        from livemat.blend import paint
+
+        paint.start(bpy.context, self.obj, layer)
+        strokes = self.mesh.color_attributes[data.PAINT]
+        strokes.data[0].color_srgb = (1.0, 1.0, 1.0, 1.0)
+        bpy.ops.object.mode_set(mode="OBJECT")
+        paint._tick()  # what the timer does after the mode change
+        self.assertEqual(self.mesh.livemat_blend.painting, "")
+        self.assertNotIn(data.PAINT, self.mesh.color_attributes)
+        self.assertEqual(int(final_values(self.mesh)[0]), 255)
+
+    def test_edge_wear_on_a_cube(self):
+        layer = self.add("GENERATOR", "EDGES")
+        self.assertTrue(bpy.ops.livemat.blend_bake.poll())
+        bpy.ops.livemat.blend_bake()
+        # Every cube corner touches 90 degree convex edges; levels 30..90 make that 1.
+        self.assertTrue(np.all(final_values(self.mesh) == 255))
+        layer.high = 1.0  # 90 degrees now sits halfway between 30 and 180 degrees
+        values = final_values(self.mesh)
+        self.assertTrue(np.all((values > 60) & (values < 120)), values[:4])
+
+    def test_cycles_bakes_restore_the_scene(self):
+        engine = bpy.context.scene.render.engine
+        material = bpy.data.materials.new("Mine")
+        self.mesh.materials.append(material)
+        for generator in ("AO", "THICKNESS", "CURVATURE"):
+            layer = self.add("GENERATOR", generator)
+            layer.samples = 4
+            self.assertEqual(bpy.ops.livemat.blend_bake(), {"FINISHED"}, generator)
+            self.assertTrue(layer.baked)
+        self.assertEqual(bpy.context.scene.render.engine, engine)
+        self.assertEqual(self.mesh.materials[0], material)
+        self.assertNotIn("LiveMat Bake", bpy.data.materials)
+        self.assertNotIn("LiveMat Bake", self.mesh.color_attributes)
+        self.assertEqual(self.mesh.color_attributes.active_color_name, data.FINAL)
+
+    def test_ao_bake_is_bright_on_an_open_cube(self):
+        layer = self.add("GENERATOR", "AO")
+        layer.samples = 8
+        bpy.ops.livemat.blend_bake()
+        self.assertGreater(final_values(self.mesh).mean(), 200)  # nothing occludes a lone cube
+
+    def test_fill_refuses_other_layer_kinds(self):
+        self.add("PAINT")
+        self.edit_select_faces([0])
+        self.assertEqual(bpy.ops.livemat.blend_fill(action="SET"), {"CANCELLED"})

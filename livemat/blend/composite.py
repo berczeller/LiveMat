@@ -38,6 +38,13 @@ def blend(below, value, alpha, mode):
     return np.clip(result, 0.0, 1.0)
 
 
+def levels(raw, low, high, invert=False):
+    """Remap `raw` so `low` becomes 0 and `high` becomes 1, like Levels in an image editor."""
+    span = max(high - low, 1e-6)
+    result = np.clip((np.asarray(raw, dtype=np.float32) - low) / span, 0.0, 1.0)
+    return (1.0 - result) if invert else result
+
+
 def channel(base, layers, count):
     """One channel from its base value and its layers, listed top first.
 

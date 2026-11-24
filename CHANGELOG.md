@@ -10,6 +10,8 @@ All notable changes to this project are documented here. The format follows Keep
 - Select by edge angle: convex, concave or both, within an angle range.
 - Saved selections that can be selected again and combined.
 - Export checks that make sure engines read the mask as the first vertex color set, with a one-click fix and an FBX round-trip test.
+- Three layer kinds: Fill, Paint (painted with Blender's vertex paint brushes, with live preview) and Generator.
+- Generators baked from the mesh: Ambient Occlusion, Thickness and Curvature with Cycles, and Edge Wear from face angles. Low, High and Invert remap them live without baking again.
 
 ### Changed
 - The sidebar panel has side tabs for Build, Blend and Templates. The Material inspector moved into the Build tab.

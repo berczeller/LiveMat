@@ -5,7 +5,7 @@ import bmesh
 import bpy
 from bpy.props import BoolProperty, EnumProperty, IntProperty
 
-from . import data, export, fill, selection
+from . import data, export, fill, generators, paint, props, selection
 
 
 def _mesh(context):
@@ -178,10 +178,114 @@ class LIVEMAT_OT_blend_layer_add(_LayerOperator, bpy.types.Operator):
     bl_label = "Add Layer"
     bl_description = "Add a layer on top of the active channel"
 
+    kind: EnumProperty(
+        items=props.LAYER_KINDS,
+        default="FILL",
+        options={"SKIP_SAVE"},
+    )
+    generator: EnumProperty(
+        items=props.GENERATORS,
+        default="AO",
+        options={"SKIP_SAVE"},
+    )
+
     def execute(self, context):
         mesh = _mesh(context)
-        data.add_layer(mesh, mesh.livemat_blend.channel)
+        if mesh.color_attributes.get(data.FINAL) is None:
+            data.composite_mesh(mesh)
+        names = {"FILL": "Fill", "PAINT": "Paint", "GENERATOR": dict(
+            AO="AO", THICKNESS="Thickness", CURVATURE="Curvature", EDGES="Edge Wear")[self.generator]}
+        layer = data.add_layer(mesh, mesh.livemat_blend.channel, names[self.kind])
+        layer.kind = self.kind
+        if self.kind == "GENERATOR":
+            layer.generator = self.generator
+            layer.low, layer.high = generators.DEFAULT_LEVELS.get(self.generator, (0.0, 1.0))
         data.composite_mesh(mesh)
+        return {"FINISHED"}
+
+
+class LIVEMAT_MT_blend_add_layer(bpy.types.Menu):
+    bl_label = "Add Layer"
+
+    def draw(self, _context):
+        layout = self.layout
+        layout.operator("livemat.blend_layer_add", text="Fill", icon="SNAP_FACE").kind = "FILL"
+        layout.operator("livemat.blend_layer_add", text="Paint", icon="BRUSH_DATA").kind = "PAINT"
+        layout.separator()
+        for key, label, icon in (
+            ("AO", "Ambient Occlusion", "SHADING_RENDERED"),
+            ("THICKNESS", "Thickness", "MOD_SOLIDIFY"),
+            ("CURVATURE", "Curvature", "SPHERECURVE"),
+            ("EDGES", "Edge Wear", "MOD_BEVEL"),
+        ):
+            op = layout.operator("livemat.blend_layer_add", text=label, icon=icon)
+            op.kind = "GENERATOR"
+            op.generator = key
+
+
+def _active_layer(mesh):
+    state = mesh.livemat_blend
+    layers = data.layers_of(state, state.channel)
+    index = getattr(state, f"active_{state.channel.lower()}")
+    return layers[index] if 0 <= index < len(layers) else None
+
+
+class LIVEMAT_OT_blend_paint(_MeshOperator, bpy.types.Operator):
+    bl_idname = "livemat.blend_paint"
+    bl_label = "Paint"
+    bl_description = "Paint this layer with Blender's vertex paint brushes. White applies the layer's value, black removes it"
+
+    @classmethod
+    def poll(cls, context):
+        mesh = _mesh(context)
+        if mesh is None or context.mode not in {"OBJECT", "PAINT_VERTEX"}:
+            return False
+        layer = _active_layer(mesh)
+        return layer is not None and layer.kind == "PAINT" and not mesh.livemat_blend.painting
+
+    def execute(self, context):
+        paint.start(context, context.object, _active_layer(_mesh(context)))
+        return {"FINISHED"}
+
+
+class LIVEMAT_OT_blend_paint_done(_MeshOperator, bpy.types.Operator):
+    bl_idname = "livemat.blend_paint_done"
+    bl_label = "Done"
+    bl_description = "Keep the strokes and go back to Object Mode"
+
+    @classmethod
+    def poll(cls, context):
+        mesh = _mesh(context)
+        return mesh is not None and bool(mesh.livemat_blend.painting)
+
+    def execute(self, context):
+        mesh = _mesh(context)
+        if context.mode == "PAINT_VERTEX":
+            bpy.ops.object.mode_set(mode="OBJECT")
+        paint.finish(mesh)
+        return {"FINISHED"}
+
+
+class LIVEMAT_OT_blend_bake(_LayerOperator, bpy.types.Operator):
+    bl_idname = "livemat.blend_bake"
+    bl_label = "Bake"
+    bl_description = "Bake this generator layer from the mesh. AO, Thickness and Curvature use Cycles"
+
+    @classmethod
+    def poll(cls, context):
+        if not super().poll(context):
+            return False
+        layer = _active_layer(_mesh(context))
+        return layer is not None and layer.kind == "GENERATOR"
+
+    def execute(self, context):
+        layer = _active_layer(_mesh(context))
+        try:
+            low, high = generators.bake(context, context.object, layer)
+        except generators.BakeError as error:
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        self.report({"INFO"}, f"Baked {layer.name}: raw values from {low:.3f} to {high:.3f}")
         return {"FINISHED"}
 
 
@@ -345,6 +449,10 @@ register, unregister = bpy.utils.register_classes_factory(
         LIVEMAT_OT_blend_set_remove,
         LIVEMAT_OT_blend_set_combine,
         LIVEMAT_OT_blend_layer_add,
+        LIVEMAT_MT_blend_add_layer,
+        LIVEMAT_OT_blend_paint,
+        LIVEMAT_OT_blend_paint_done,
+        LIVEMAT_OT_blend_bake,
         LIVEMAT_OT_blend_layer_remove,
         LIVEMAT_OT_blend_layer_move,
         LIVEMAT_OT_blend_view,

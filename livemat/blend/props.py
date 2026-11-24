@@ -41,12 +41,55 @@ def _channel_changed(self, context):
     _recomposite(self, context)
 
 
+LAYER_KINDS = (
+    ("FILL", "Fill", "Values written on selections with Set, Randomize or the Polygon Fill tool", "SNAP_FACE", 0),
+    ("PAINT", "Paint", "Painted with Blender's vertex paint brushes: white applies the layer's value", "BRUSH_DATA", 1),
+    ("GENERATOR", "Generator", "Baked from the shape: ambient occlusion, thickness, curvature or edges", "MOD_SMOOTH", 2),
+)
+
+GENERATORS = (
+    ("AO", "Ambient Occlusion", "Darker where the surface is hidden from the sky, like in crevices", "SHADING_RENDERED", 0),
+    ("THICKNESS", "Thickness", "Darker where the object is thin", "MOD_SOLIDIFY", 1),
+    ("CURVATURE", "Curvature", "Bright on bumps and edges, dark in dents, from Cycles' pointiness", "SPHERECURVE", 2),
+    ("EDGES", "Edge Wear", "Bright on convex edges, from the angle between faces. No Cycles needed", "MOD_BEVEL", 3),
+)
+
+
 class LiveMatBlendLayer(bpy.types.PropertyGroup):
     # `name` comes from PropertyGroup.
     uid: StringProperty()
+    kind: EnumProperty(name="Kind", items=LAYER_KINDS, default="FILL")
     visible: BoolProperty(name="Visible", default=True, update=_recomposite)
     opacity: FloatProperty(name="Opacity", default=1.0, min=0.0, max=1.0, subtype="FACTOR", update=_recomposite)
     blend_mode: EnumProperty(name="Blend", items=composite.BLEND_MODES, default="NORMAL", update=_recomposite)
+    # Paint layers
+    paint_value: FloatProperty(
+        name="Value", default=1.0, min=0.0, max=1.0, subtype="FACTOR",
+        description="Value the layer applies where you paint white", update=_recomposite,
+    )
+    # Generator layers
+    generator: EnumProperty(name="Generator", items=GENERATORS, default="AO")
+    distance: FloatProperty(
+        name="Distance", default=0.5, min=0.001, soft_max=10.0, subtype="DISTANCE",
+        description="How far occlusion is looked for (AO and Thickness)",
+    )
+    samples: IntProperty(name="Samples", default=32, min=1, max=1024, description="Cycles samples for the bake")
+    only_local: BoolProperty(name="Only This Object", default=False, description="Ignore other objects when baking AO")
+    edge_kind: EnumProperty(
+        name="Edges",
+        items=[("CONVEX", "Convex", "Ridges"), ("CONCAVE", "Concave", "Valleys"), ("BOTH", "Both", "Ridges and valleys")],
+        default="CONVEX",
+    )
+    low: FloatProperty(
+        name="Low", default=0.0, min=0.0, max=1.0, subtype="FACTOR",
+        description="Baked values at or below this become 0", update=_recomposite,
+    )
+    high: FloatProperty(
+        name="High", default=1.0, min=0.0, max=1.0, subtype="FACTOR",
+        description="Baked values at or above this become 1", update=_recomposite,
+    )
+    invert: BoolProperty(name="Invert", default=False, update=_recomposite)
+    baked: BoolProperty()
 
 
 class LiveMatSelectionSet(bpy.types.PropertyGroup):
@@ -68,6 +111,7 @@ def _set_clicked(self, context):
 
 class LiveMatBlendMesh(bpy.types.PropertyGroup):
     channel: EnumProperty(name="Channel", items=_channels, default=0, update=_channel_changed)
+    painting: StringProperty()  # uid of the Paint layer being painted, empty otherwise
     view_channel: StringProperty()  # the channel shown in grayscale, empty when not isolating
     base: FloatVectorProperty(
         name="Base",

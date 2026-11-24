@@ -17,7 +17,8 @@ class LIVEMAT_UL_blend_layers(bpy.types.UIList):
     def draw_item(self, _context, layout, _data, item, _icon, _active, _property):
         row = layout.row(align=True)
         row.prop(item, "visible", text="", emboss=False, icon="HIDE_OFF" if item.visible else "HIDE_ON")
-        row.prop(item, "name", text="", emboss=False)
+        kind_icon = {"FILL": "SNAP_FACE", "PAINT": "BRUSH_DATA", "GENERATOR": "MOD_SMOOTH"}[item.kind]
+        row.prop(item, "name", text="", emboss=False, icon=kind_icon)
         sub = row.row(align=True)
         sub.ui_units_x = 4.6
         sub.prop(item, "blend_mode", text="")
@@ -32,6 +33,45 @@ class LIVEMAT_UL_blend_sets(bpy.types.UIList):
         count = row.row()
         count.enabled = False
         count.label(text=str(item.count))
+
+
+def draw_layer_settings(layout, context, mesh, layer):
+    """Settings of the active layer, depending on its kind."""
+    col = layout.column(align=True)
+    col.prop(layer, "opacity", slider=True)
+    if layer.kind == "PAINT":
+        col.prop(layer, "paint_value", slider=True)
+        row = layout.row(align=True)
+        row.scale_y = 1.3
+        if mesh.livemat_blend.painting == layer.uid:
+            row.active_default = True
+            row.operator("livemat.blend_paint_done", icon="CHECKMARK")
+            hint = layout.row()
+            hint.enabled = False
+            hint.label(text="Paint white to apply, black to remove", icon="INFO")
+        else:
+            row.operator("livemat.blend_paint", icon="BRUSH_DATA")
+    elif layer.kind == "GENERATOR":
+        col = layout.column(align=True)
+        col.prop(layer, "generator", text="")
+        if layer.generator in {"AO", "THICKNESS"}:
+            col.prop(layer, "distance")
+            col.prop(layer, "samples")
+            if layer.generator == "AO":
+                col.prop(layer, "only_local")
+        elif layer.generator == "CURVATURE":
+            col.prop(layer, "samples")
+        else:
+            col.row(align=True).prop(layer, "edge_kind", expand=True)
+        row = layout.row(align=True)
+        row.prop(layer, "low", slider=True)
+        row.prop(layer, "high", slider=True)
+        row.prop(layer, "invert", text="", icon="ARROW_LEFTRIGHT", toggle=True)
+        row = layout.row(align=True)
+        row.scale_y = 1.3
+        if not layer.baked:
+            row.active_default = True
+        row.operator("livemat.blend_bake", text="Rebake" if layer.baked else "Bake", icon="RENDER_STILL")
 
 
 def draw(layout, context, section, end_section):
@@ -75,7 +115,7 @@ def draw(layout, context, section, end_section):
         "LIVEMAT_UL_blend_layers", channel, state, f"layers_{channel.lower()}", state, f"active_{channel.lower()}", rows=3
     )
     side = row.column(align=True)
-    side.operator("livemat.blend_layer_add", text="", icon="ADD")
+    side.menu("LIVEMAT_MT_blend_add_layer", text="", icon="ADD")
     side.operator("livemat.blend_layer_remove", text="", icon="REMOVE")
     side.separator()
     side.operator("livemat.blend_layer_move", text="", icon="TRIA_UP").direction = "UP"
@@ -84,7 +124,8 @@ def draw(layout, context, section, end_section):
     active = getattr(state, f"active_{channel.lower()}")
     col = body.column(align=True)
     if 0 <= active < len(layers):
-        col.prop(layers[active], "opacity", slider=True)
+        draw_layer_settings(body, context, mesh, layers[active])
+    col = body.column(align=True)
     col.prop(state, "base", index=index, text="Base", slider=True)
     end_section(body)
 

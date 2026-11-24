@@ -30,7 +30,9 @@ def issues(mesh):
     order = [a.name for a in colors]
     if colors.get(data.VIEW) is not None:
         found.append("Channel view is on, and its temporary colors would be exported too. Switch to Material view")
-    first = next(name for name in order if name != data.VIEW)
+    if colors.get(data.PAINT) is not None:
+        found.append("A Paint layer is open. Press Done so its temporary colors aren't exported")
+    first = next(name for name in order if name not in data.TEMPORARY)
     if first != data.FINAL:
         found.append(f"{first} is exported before {data.FINAL}, so the engine would read that one")
     if final.data_type != "BYTE_COLOR" or final.domain != "CORNER":
@@ -45,7 +47,7 @@ def move_first(mesh):
         return []
     active = colors.active_color_name
     moved = []
-    for attribute in [a for a in colors if a.name not in {data.FINAL, data.VIEW}]:
+    for attribute in [a for a in colors if a.name != data.FINAL and a.name not in data.TEMPORARY]:
         name, kind, domain = attribute.name, attribute.data_type, attribute.domain
         values = np.zeros(len(attribute.data) * 4, dtype=np.float32)
         # Raw bytes for byte colors, linear floats for float colors: both round-trip exactly.

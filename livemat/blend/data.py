@@ -27,6 +27,8 @@ from . import composite
 
 FINAL = "LiveMat Blend"
 VIEW = "LiveMat View"  # temporary attribute for viewing one channel in grayscale
+PAINT = "LiveMat Paint"  # temporary attribute the brushes paint into while a Paint layer is open
+TEMPORARY = (VIEW, PAINT)
 LAYER_PREFIX = ".lm_layer_"
 SET_PREFIX = ".lm_set_"
 CHANNELS = ("R", "G", "B", "A")
@@ -170,15 +172,31 @@ def composite_mesh(mesh, bm=None):
             for layer in layers_of(state, channel):
                 if not layer.visible:
                     continue
-                data = acc.read_layer(layer_attribute(layer.uid))
-                stack.append((data[:, 0], data[:, 1], layer.opacity, layer.blend_mode))
+                stored = acc.read_layer(layer_attribute(layer.uid))
+                values, coverage = layer_values(layer, stored)
+                stack.append((values, coverage, layer.opacity, layer.blend_mode))
             result[:, index] = composite.channel(state.base[index], stack, acc.count)
         acc.write_colors(FINAL, result)
         if state.view_channel:
             column = result[:, CHANNELS.index(state.view_channel)]
             gray = np.stack([column, column, column, np.ones_like(column)], axis=1)
             acc.write_colors(VIEW, gray)
-    make_active(mesh, VIEW if state.view_channel else FINAL)
+    # While painting, the brushes must keep painting into the Paint attribute.
+    make_active(mesh, PAINT if state.painting else VIEW if state.view_channel else FINAL)
+
+
+def layer_values(layer, stored):
+    """(values, coverage) a layer contributes, from its stored (x, y, z) per corner.
+
+    Fill: x is the value, y the coverage.
+    Paint: x is the painted gray, used as coverage for the layer's value.
+    Generator: z is the raw bake, remapped by Low/High and Invert.
+    """
+    if layer.kind == "PAINT":
+        return np.full(len(stored), layer.paint_value, dtype=np.float32), stored[:, 0]
+    if layer.kind == "GENERATOR":
+        return composite.levels(stored[:, 2], layer.low, layer.high, layer.invert), np.ones(len(stored), dtype=np.float32)
+    return stored[:, 0], stored[:, 1]
 
 
 def prune(mesh):

@@ -142,6 +142,8 @@ def apply(context, mesh, action, value=1.0):
     coverage = 0.0 if action == "CLEAR" else 1.0
 
     layer = data.ensure_layer(mesh, state.channel)
+    if layer.kind != "FILL":
+        raise SelectionError(f"{layer.name} is a {layer.kind.title()} layer. Pick or add a Fill layer to fill selections")
     name = data.layer_attribute(layer.uid)
     with data.access(mesh, bm) as acc:
         stored = acc.read_layer(name)
