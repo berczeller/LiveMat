@@ -531,8 +531,8 @@ class BlendMaterialTest(BlendTestBase):
 
         self._tmp = tempfile.TemporaryDirectory()
         folder = self._tmp.name
-        make_texture_set(folder, "Brick", {"_BaseColor": (200, 40, 40), "_Roughness": (230,)})
-        make_texture_set(folder, "Moss", {"_BaseColor": (40, 160, 60), "_Roughness": (230,)})
+        make_texture_set(folder, "Brick", {"_BaseColor": (200, 40, 40), "_Roughness": (230,), "_Height": (0,)})
+        make_texture_set(folder, "Moss", {"_BaseColor": (40, 160, 60), "_Roughness": (230,), "_Height": (255,)})
         props = bpy.context.scene.livemat
         props.folder = folder
         props.preset = "default_metal_rough"
@@ -709,7 +709,72 @@ class PixelMaskTest(BlendMaterialTest):
         image.colorspace_settings.name = "Non-Color"
         pixel = tuple(round(v, 2) for v in image.pixels[:4])
         bpy.data.images.remove(image)
-        self.assertEqual(pixel, (0.5, 0.5, 0.0, 0.0))  # weights add up to 1
+        self.assertEqual(pixel, (0.0, 1.0, 0.0, 0.0))  # G fully covers the bottom layer R, as in the preview
 
         paths = texture.export(blend, folder, "land", "UNREAL_LANDSCAPE", "PNG")
         self.assertEqual(sorted(os.path.basename(p) for p in paths), ["land_A.png", "land_B.png", "land_G.png", "land_R.png"])
+
+
+class BlendReviewRegressionTest(PixelMaskTest):
+    def test_other_blend_materials_keep_their_links(self):
+        first = self.make_blend()
+        links = len(first.node_tree.links)
+        self.obj.active_material = self.brick
+        bpy.ops.livemat.blend_material_create()  # same base: rebuilds the shared layer group
+        self.assertEqual(len(first.node_tree.links), links)
+        from livemat.blend import material
+
+        material.rebuild_all()
+        self.assertEqual(len(first.node_tree.links), links)
+
+    def test_height_blend_keeps_the_ends_at_full_influence(self):
+        brick = self.render()
+        self.obj.active_material = self.moss
+        moss = self.render()
+        self.obj.active_material = self.brick
+        blend = self.make_blend()
+        setup = blend.livemat_blend_material
+        setup.use_height = True
+        setup.height_influence = 1.0
+        setup.transition = 0.2
+        self.set_mask_r(0.0)  # Moss is as high as a height map gets, and still mustn't show
+        self.assertPixel(self.render(), brick, 0.02)
+        self.set_mask_r(1.0)
+        self.assertPixel(self.render(), moss, 0.02)
+
+    def test_resolution_change_before_converting(self):
+        from livemat.blend import texture
+
+        blend = self.make_blend()
+        texture.channel_image(blend, "R", create=True)  # made at 512
+        blend.livemat_blend_material.resolution = "1024"
+        self.set_mask_r(1.0)
+        self.assertEqual(bpy.ops.livemat.blend_mask_convert(direction="TO_TEXTURE"), {"FINISHED"})
+        self.assertEqual(tuple(blend.livemat_blend_material.image_r.size), (1024, 1024))
+
+    def test_export_from_vertex_leaves_painted_images_alone(self):
+        import os
+
+        from livemat.blend import texture
+
+        blend = self.make_blend()
+        self.fill_image(blend, "R", 0.25)  # painted earlier
+        blend.livemat_blend_material.mask_source = "VERTEX"
+        self.set_mask_r(1.0)
+        tool = bpy.context.scene.livemat_blend_tool
+        tool.export_folder = os.path.join(self._tmp.name, "out")
+        self.assertEqual(bpy.ops.livemat.blend_mask_export(), {"FINISHED"})
+        self.assertAlmostEqual(float(texture.read_gray(blend.livemat_blend_material.image_r).mean()), 0.25, places=2)
+
+    def test_bakes_ignore_selected_to_active(self):
+        bpy.context.scene.render.bake.use_selected_to_active = True
+        try:
+            if bpy.context.mode != "OBJECT":
+                bpy.ops.object.mode_set(mode="OBJECT")
+            bpy.ops.livemat.blend_layer_add(kind="GENERATOR", generator="AO")
+            self.mesh.livemat_blend.layers_r[0].samples = 2
+            self.assertEqual(bpy.ops.livemat.blend_bake(), {"FINISHED"})
+            blend = self.make_blend()
+            self.assertEqual(bpy.ops.livemat.blend_mask_convert(direction="TO_TEXTURE"), {"FINISHED"})
+        finally:
+            bpy.context.scene.render.bake.use_selected_to_active = False

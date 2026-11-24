@@ -102,6 +102,8 @@ def _painting_meshes():
 def _tick():
     try:
         for mesh in _painting_meshes():
+            if mesh.is_editmode:
+                continue  # its attributes can't be read in Edit Mode; finish once it's back out
             users = [o for o in bpy.data.objects if o.data == mesh]
             if any(o.mode == "VERTEX_PAINT" for o in users):
                 sync(mesh)

@@ -106,7 +106,7 @@ def cycles_bake(context, obj, generator, distance, samples, only_local):
         obj.select_set(True)
         view_layer.objects.active = obj
         try:
-            bpy.ops.object.bake(type="EMIT", target="VERTEX_COLORS")
+            bpy.ops.object.bake(type="EMIT", target="VERTEX_COLORS", use_selected_to_active=False, use_cage=False)
         except RuntimeError as error:
             raise BakeError(f"Cycles couldn't bake this mesh: {error}") from error
         values = np.zeros(len(attribute.data) * 4, dtype=np.float32)

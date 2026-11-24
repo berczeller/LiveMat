@@ -158,7 +158,7 @@ class LIVEMAT_OT_blend_polygon_fill(bpy.types.Operator):
     bl_idname = "livemat.blend_polygon_fill"
     bl_label = "Polygon Fill"
     bl_description = (
-        "Click a polygon or drag a rectangle to fill the active channel. Ctrl clears. "
+        "Click a polygon or drag a rectangle in the viewport to fill the active channel. Ctrl clears. "
         "Esc or right-click to finish"
     )
     bl_options = {"REGISTER"}
@@ -172,7 +172,15 @@ class LIVEMAT_OT_blend_polygon_fill(bpy.types.Operator):
         return data.FINAL in obj.data.color_attributes
 
     def invoke(self, context, _event):
-        self.picker = Picker(context.object)
+        # The button lives in the sidebar: work in the viewport's own region, not the panel's.
+        self.area = context.area
+        self.region = next((r for r in self.area.regions if r.type == "WINDOW"), None)
+        self.rv3d = context.space_data.region_3d
+        if self.region is None or self.rv3d is None:
+            self.report({"WARNING"}, "Start Polygon Fill from a 3D Viewport")
+            return {"CANCELLED"}
+        self.obj = context.object
+        self.picker = Picker(self.obj)
         self.hover = set()
         self.press = None
         self.mouse = None
@@ -186,26 +194,45 @@ class LIVEMAT_OT_blend_polygon_fill(bpy.types.Operator):
 
     def _status(self, context):
         tool = context.scene.livemat_blend_tool
-        channel = context.object.data.livemat_blend.channel
-        context.area.header_text_set(
-            f"Polygon Fill {channel} = {tool.value:.2f}, by {tool.fill_mode.title()}: click or drag to fill, "
-            "Ctrl clears, Esc or right-click to finish"
+        channel = self.obj.data.livemat_blend.channel
+        self.area.header_text_set(
+            f"Polygon Fill {channel} = {tool.value:.2f}, by {tool.fill_mode.replace('_', ' ').title()}: "
+            "click or drag to fill, Ctrl clears, Esc or right-click to finish"
         )
 
-    def _finish(self, context):
-        for handle in self.handles:
-            bpy.types.SpaceView3D.draw_handler_remove(handle, "WINDOW")
-        context.area.header_text_set(None)
-        context.area.tag_redraw()
+    def _finish(self):
+        for handle in getattr(self, "handles", ()):
+            try:
+                bpy.types.SpaceView3D.draw_handler_remove(handle, "WINDOW")
+            except ValueError:
+                pass  # already removed
+        self.handles = ()
+        try:
+            self.area.header_text_set(None)
+            self.area.tag_redraw()
+        except (AttributeError, ReferenceError):
+            pass  # the area closed
 
-    def _ray(self, context, coord):
-        region, rv3d = context.region, context.region_data
-        origin = view3d_utils.region_2d_to_origin_3d(region, rv3d, coord)
-        direction = view3d_utils.region_2d_to_vector_3d(region, rv3d, coord)
+    def cancel(self, _context):
+        # Called when Blender stops the tool itself: a file load, a closed window.
+        self._finish()
+
+    def _local(self, event):
+        """Mouse position in the viewport region, or None when the mouse is outside it."""
+        x, y = event.mouse_x - self.region.x, event.mouse_y - self.region.y
+        if 0 <= x < self.region.width and 0 <= y < self.region.height:
+            return (x, y)
+        return None
+
+    def _ray(self, coord):
+        origin = view3d_utils.region_2d_to_origin_3d(self.region, self.rv3d, coord)
+        direction = view3d_utils.region_2d_to_vector_3d(self.region, self.rv3d, coord)
+        if not self.rv3d.is_perspective:
+            origin = origin - direction * 1e4  # an orthographic ray starts at the view plane: back it up
         return origin, direction
 
     def _under(self, context, coord):
-        origin, direction = self._ray(context, coord)
+        origin, direction = self._ray(coord)
         index = self.picker.ray(origin, direction)
         if index is None:
             return set()
@@ -213,7 +240,7 @@ class LIVEMAT_OT_blend_polygon_fill(bpy.types.Operator):
 
     def _rectangle_selection(self, context):
         tool = context.scene.livemat_blend_tool
-        region, rv3d = context.region, context.region_data
+        region, rv3d = self.region, self.rv3d
         (x0, y0), (x1, y1) = self.press, self.mouse
         rect = (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
         project = lambda point: view3d_utils.location_3d_to_region_2d(region, rv3d, point)
@@ -227,41 +254,53 @@ class LIVEMAT_OT_blend_polygon_fill(bpy.types.Operator):
             return
         tool = context.scene.livemat_blend_tool
         try:
-            apply(context.object.data, polygons, tool.value, clear=clear)
+            apply(self.obj.data, polygons, tool.value, clear=clear)
         except ValueError as error:
             self.report({"WARNING"}, str(error))
             return
         bpy.ops.ed.undo_push(message="Polygon Fill")
 
     def modal(self, context, event):
-        if context.area is None:
-            return {"CANCELLED"}
+        try:
+            return self._modal(context, event)
+        except Exception:
+            self._finish()
+            raise
+
+    def _modal(self, context, event):
         if event.type in {"ESC", "RIGHTMOUSE"} and event.value == "PRESS":
-            self._finish(context)
+            self._finish()
             return {"FINISHED"}
-        if event.type in {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE", "TRACKPADPAN", "TRACKPADZOOM"}:
+        coord = self._local(event)
+        if coord is None and self.press is None:
+            self.hover = set()
+            self.area.tag_redraw()
+            return {"PASS_THROUGH"}  # outside the viewport: the panel and menus keep working
+        if event.type in {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE", "TRACKPADPAN", "TRACKPADZOOM"} or event.type.startswith("NDOF"):
             return {"PASS_THROUGH"}  # keep orbiting and zooming
-        coord = (event.mouse_region_x, event.mouse_region_y)
         if event.type == "MOUSEMOVE":
-            self.mouse = coord
-            if self.press is None:
+            if coord is not None:
+                self.mouse = coord
+            if self.press is None and coord is not None:
                 self.hover = self._under(context, coord)
-            context.area.tag_redraw()
+            self.area.tag_redraw()
             return {"RUNNING_MODAL"}
         if event.type == "LEFTMOUSE" and event.value == "PRESS":
             self.press = coord
             self.mouse = coord
             return {"RUNNING_MODAL"}
         if event.type == "LEFTMOUSE" and event.value == "RELEASE" and self.press is not None:
-            dragged = (Vector(coord) - Vector(self.press)).length > DRAG
-            polygons = self._rectangle_selection(context) if dragged else self._under(context, coord)
+            end = coord or self.mouse
+            dragged = (Vector(end) - Vector(self.press)).length > DRAG
+            self.mouse = end
+            polygons = self._rectangle_selection(context) if dragged else self._under(context, end)
             self.press = None
             self._fill(context, polygons, clear=event.ctrl)
-            self.hover = self._under(context, coord)
+            self.hover = self._under(context, end)
             self._status(context)
-            context.area.tag_redraw()
+            self.area.tag_redraw()
             return {"RUNNING_MODAL"}
-        return {"PASS_THROUGH"} if event.type.startswith("NDOF") or event.type in {"TIMER", "TIMER_REPORT"} else {"RUNNING_MODAL"}
+        return {"PASS_THROUGH"} if event.type in {"TIMER", "TIMER_REPORT"} else {"RUNNING_MODAL"}
 
     def _draw_highlight(self):
         if not self.hover or self.press is not None:

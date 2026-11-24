@@ -539,7 +539,7 @@ class LIVEMAT_OT_blend_mask_convert(_MaskOperator, bpy.types.Operator):
             else:
                 done = texture.to_vertex(material, context.object)
                 material.livemat_blend_material.mask_source = "VERTEX"
-        except generators.BakeError as error:
+        except (generators.BakeError, TypeError, RuntimeError) as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
         self.report({"INFO"}, f"Converted channels {', '.join(done) or 'none'}")
@@ -564,10 +564,14 @@ class LIVEMAT_OT_blend_mask_export(_MaskOperator, bpy.types.Operator):
         folder = bpy.path.abspath(tool.export_folder)
         material = _blend_material(context)
         try:
+            arrays = None
             if material.livemat_blend_material.mask_source == "VERTEX":
-                texture.from_vertex(context, material, context.object)  # textures follow the vertex mask
-            paths = texture.export(material, folder, bpy.path.clean_name(material.name), tool.export_preset, tool.export_format)
-        except (generators.BakeError, OSError, RuntimeError) as error:
+                # Bake on the fly: painted mask images (if any) stay as they are.
+                arrays = texture.bake_vertex(context, material, context.object)
+            paths = texture.export(
+                material, folder, bpy.path.clean_name(material.name), tool.export_preset, tool.export_format, arrays
+            )
+        except (generators.BakeError, OSError, RuntimeError, TypeError) as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
         names = ", ".join(os.path.basename(p) for p in paths)

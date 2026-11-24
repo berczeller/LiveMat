@@ -20,7 +20,7 @@ MASK_PREFIX = "LiveMat Mask "  # + material name + " " + channel
 EXPORT_PRESETS = (
     ("GENERIC", "Generic RGBA", "One RGBA image: R, G, B, A as painted", 0),
     ("UNITY_HDRP", "Unity HDRP LayeredLit", "Layer Mask: R, G, B drive layers 1 to 3, A the main layer", 1),
-    ("UNITY_TERRAIN", "Unity Terrain Splatmap", "RGBA splatmap for 4 terrain layers, weights normalized to add up to 1", 2),
+    ("UNITY_TERRAIN", "Unity Terrain Splatmap", "RGBA splatmap for 4 terrain layers: R is the bottom one, weights add up to 1", 2),
     ("UNREAL", "Unreal (Packed RGBA)", "One RGBA mask for a layered material", 3),
     ("UNREAL_LANDSCAPE", "Unreal Landscape Layers", "One grayscale image per channel, for landscape layer import", 4),
     ("GODOT", "Godot", "One RGBA image, read as raw data", 5),
@@ -29,7 +29,7 @@ EXPORT_PRESETS = (
 IMPORT_NOTES = {
     "GENERIC": "Import as data: no sRGB, no color compression",
     "UNITY_HDRP": "Unity: untick sRGB (Color Texture) in the import settings",
-    "UNITY_TERRAIN": "Unity: untick sRGB, then assign as the terrain's splatmap",
+    "UNITY_TERRAIN": "Unity: untick sRGB. R is the bottom layer, G, B and A paint over it",
     "UNREAL": "Unreal: Compression Settings Masks (no sRGB)",
     "UNREAL_LANDSCAPE": "Unreal: import each file on its landscape layer, same resolution as the landscape",
     "GODOT": "Godot: import as Lossless, sample without source_color",
@@ -64,6 +64,8 @@ def read_gray(image):
 
 def write_gray(image, values):
     height, width = values.shape
+    if tuple(image.size) != (width, height):
+        image.scale(width, height)  # the Resolution setting changed since the image was made
     rgba = np.ones((height, width, 4), dtype=np.float32)
     rgba[:, :, 0] = rgba[:, :, 1] = rgba[:, :, 2] = values
     image.pixels.foreach_set(rgba.ravel())
@@ -123,8 +125,8 @@ def to_vertex(material, obj):
 
 
 
-def from_vertex(context, material, obj):
-    """Bake the mesh's vertex mask into the material's channel images, exactly, with Cycles."""
+def bake_vertex(context, material, obj):
+    """The mesh's vertex mask baked through the UVs, exactly, as {channel: (size, size) array}."""
     mesh = obj.data
     if mesh.color_attributes.get(data.FINAL) is None:
         raise generators.BakeError("This mesh has no Blend mask to convert")
@@ -133,12 +135,15 @@ def from_vertex(context, material, obj):
     size = int(material.livemat_blend_material.resolution)
     target = bpy.data.images.new("LiveMat Mask Bake Target", size, size, alpha=False, float_buffer=True)
     target.colorspace_settings.name = "Non-Color"
-    results = {}
     try:
-        for channel in data.CHANNELS:
-            results[channel] = _bake_channel(context, obj, channel, target)
+        return {channel: _bake_channel(context, obj, channel, target) for channel in data.CHANNELS}
     finally:
         bpy.data.images.remove(target)
+
+
+def from_vertex(context, material, obj):
+    """Bake the mesh's vertex mask into the material's channel images."""
+    results = bake_vertex(context, material, obj)
     for channel, values in results.items():
         write_gray(channel_image(material, channel, create=True), values)
     return list(results)
@@ -166,8 +171,15 @@ def _bake_channel(context, obj, channel, target):
     image_node = g.new("ShaderNodeTexImage", 5)
     image_node.image = target
     tree.nodes.active = image_node  # the bake writes into the active image node
+    uv = obj.data.uv_layers.active_render or obj.data.uv_layers.active
     try:
-        _with_material(context, obj, bake, lambda: bpy.ops.object.bake(type="EMIT", target="IMAGE_TEXTURES", margin=4))
+        _with_material(
+            context, obj, bake,
+            lambda: bpy.ops.object.bake(
+                type="EMIT", target="IMAGE_TEXTURES", margin=4, uv_layer=uv.name,
+                use_selected_to_active=False, use_cage=False,
+            ),
+        )
         return read_gray(target).copy()
     finally:
         bpy.data.materials.remove(bake)
@@ -240,14 +252,19 @@ def channels_for_export(material):
     return arrays
 
 
-def _normalize(arrays):
-    """Terrain weights: the four channels scaled to add up to 1, the first layer where all are 0."""
-    stack = np.stack([arrays[c] for c in data.CHANNELS], axis=-1)
-    total = stack.sum(axis=-1, keepdims=True)
-    empty = total[..., 0] <= 1e-6
-    stack = np.divide(stack, np.maximum(total, 1e-6))
-    stack[empty] = (1.0, 0.0, 0.0, 0.0)
-    return {c: stack[..., i] for i, c in enumerate(data.CHANNELS)}
+def _terrain_weights(arrays):
+    """Splatmap weights that match the Blend preview with height off, adding up to 1.
+
+    The preview lays R, then G, B and A over the base, each covering what's
+    below by its mask. A terrain has no separate base, so layer 1 (R) plays
+    the base: it gets whatever the layers above leave uncovered.
+    """
+    g, b, a = arrays["G"], arrays["B"], arrays["A"]
+    weight_a = a
+    weight_b = b * (1.0 - a)
+    weight_g = g * (1.0 - b) * (1.0 - a)
+    weight_r = (1.0 - g) * (1.0 - b) * (1.0 - a)
+    return {"R": weight_r, "G": weight_g, "B": weight_b, "A": weight_a}
 
 
 def _save(path, rgba, file_format):
@@ -264,12 +281,16 @@ def _save(path, rgba, file_format):
         bpy.data.images.remove(image)
 
 
-def export(material, folder, name, preset, file_format):
-    """Write the mask in the preset's layout. Returns the written paths."""
+def export(material, folder, name, preset, file_format, arrays=None):
+    """Write the mask in the preset's layout. Returns the written paths.
+
+    `arrays` overrides the material's mask images (for a vertex mask baked on the fly).
+    """
     extension = {"PNG": ".png", "TARGA": ".tga"}[file_format]
-    arrays = channels_for_export(material)
+    if arrays is None:
+        arrays = channels_for_export(material)
     if preset == "UNITY_TERRAIN":
-        arrays = _normalize(arrays)
+        arrays = _terrain_weights(arrays)
     os.makedirs(folder, exist_ok=True)
     written = []
     if preset == "UNREAL_LANDSCAPE":

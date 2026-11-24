@@ -9,11 +9,13 @@ that outputs its surface (base color, metallic, roughness, normal, height,
 alpha, emission). The Blend material mixes those properties channel by
 channel, then feeds one Principled BSDF, as engine shaders do.
 
-Height blend (generic): a layer with mask m and height h covers the surface
-with weight w = clamp((m + (h - 0.5) * influence - (0.5 - t / 2)) / t, 0, 1),
-t being the transition width. Where the mask is 0 the layer never shows,
-where it's 1 it always does, and in between its height map decides where
-the edge falls. With height off, w is simply m.
+Height blend (generic): a layer with mask m and height h (0 to 1) covers the
+surface with weight
+    w = clamp(((m - 0.5) * (i + t) + (h - 0.5) * i + t / 2) / t, 0, 1)
+i being Height Influence and t the Transition width. Where the mask is 0 the
+layer never shows and where it's 1 it always does, whatever the height; in
+between, the height map decides where the edge falls. With i = 0, or height
+off, w is simply m.
 """
 
 import bpy
@@ -39,15 +41,18 @@ def layer_group(source):
     """A node group holding `source`'s LiveMat nodes, outputting its surface. Rebuilt each time."""
     name = LAYER_GROUP_PREFIX + source.name
     group = bpy.data.node_groups.get(name)
-    if group is not None and group.library is None:
-        group.nodes.clear()
-        group.interface.clear()
-    else:
+    if group is None or group.library is not None:
         group = bpy.data.node_groups.new(name, "ShaderNodeTree")
+    group.nodes.clear()
+    outputs = [i.name for i in group.interface.items_tree if i.item_type == "SOCKET" and i.in_out == "OUTPUT"]
+    if outputs != SURFACE:
+        # Only when the outputs differ: recreating them gives them new identifiers, which
+        # would unlink this group in every other Blend material that uses it.
+        group.interface.clear()
+        for out_name, kind, _input, default in nodegroup.SURFACE_OUTPUTS:
+            socket = group.interface.new_socket(out_name, in_out="OUTPUT", socket_type=kind)
+            socket.default_value = default
     group["livemat_layer_of"] = source.name
-    for out_name, kind, _input, default in nodegroup.SURFACE_OUTPUTS:
-        socket = group.interface.new_socket(out_name, in_out="OUTPUT", socket_type=kind)
-        socket.default_value = default
     output = group.nodes.new("NodeGroupOutput")
     output.location = (600, 0)
 
@@ -211,12 +216,13 @@ def build(material):
         layer = source_node(source, column - 2)
         m = channels[channel]
         if setup.use_height:
-            shifted = g.math("SUBTRACT", column, layer.outputs["Height"], 0.5)
-            raised = g.math("MULTIPLY_ADD", column, shifted, setup.height_influence)
-            node = raised.node
-            g.feed(node.inputs[2], m)
-            start = 0.5 - setup.transition / 2.0
-            weight = g.math("DIVIDE", column + 1, g.math("SUBTRACT", column + 1, raised, start), max(setup.transition, 1e-4), clamp=True)
+            influence, transition = setup.height_influence, max(setup.transition, 1e-4)
+            mask_part = g.math("MULTIPLY_ADD", column, g.math("SUBTRACT", column, m, 0.5), influence + transition)
+            g.feed(mask_part.node.inputs[2], transition / 2.0)
+            height = g.math("SUBTRACT", column, layer.outputs["Height"], 0.5)
+            total = g.math("MULTIPLY_ADD", column + 1, height, influence)
+            g.feed(total.node.inputs[2], mask_part)
+            weight = g.math("DIVIDE", column + 1, total, transition, clamp=True)
         else:
             weight = m
         for name, kind, *_rest in nodegroup.SURFACE_OUTPUTS:
