@@ -19,7 +19,7 @@ class LIVEMAT_UL_blend_layers(bpy.types.UIList):
         row.prop(item, "visible", text="", emboss=False, icon="HIDE_OFF" if item.visible else "HIDE_ON")
         row.prop(item, "name", text="", emboss=False)
         sub = row.row(align=True)
-        sub.ui_units_x = 3.2
+        sub.ui_units_x = 4.6
         sub.prop(item, "blend_mode", text="")
 
 

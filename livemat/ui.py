@@ -349,8 +349,8 @@ class _MainPanel(_Sidebar):
         tabs = row.column(align=True)
         tabs.ui_units_x = 1.6
         tabs.scale_y = 1.4
-        for key, _label, _tip, icon in TABS:
-            tabs.prop_enum(wm, "livemat_tab", key, text="", icon_value=icons.get(icon))
+        # Expanded in a column, the enum draws one icon button per tab (with the custom icons).
+        tabs.prop(wm, "livemat_tab", expand=True, icon_only=True)
         content = row.column()
         if wm.livemat_tab == "BLEND":
             blend_ui.draw(content, context, section, end_section)
