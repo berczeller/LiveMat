@@ -207,6 +207,45 @@ def icons():
     )
     # Fine detail: a grid of dots.
     yield "detail", LILAC, union(*(circle(x, y, 2.4) for x in (7, 16, 25) for y in (7, 16, 25)))
+    # Build: stacked blocks.
+    yield "build", SKY, union(rect(4, 17, 15, 28, 2.6), rect(17, 17, 28, 28, 2.6), rect(10.5, 5, 21.5, 15, 2.6))
+    # Blend: two overlapping circles.
+    yield "blend", PINK, union(circle(12, 16, 8.5, width=2.8), circle(20, 16, 8.5, width=2.8))
+    # Templates: a page with a folded corner and lines.
+    yield "templates", LILAC, union(
+        polyline([(7, 4), (19, 4), (25, 10), (25, 28), (7, 28), (7, 4)], 2.6),
+        polyline([(19, 4), (19, 10), (25, 10)], 2.2),
+        polyline([(11, 17), (21, 17)], 2.2),
+        polyline([(11, 22), (21, 22)], 2.2),
+    )
+    # Layers: stacked diamonds.
+    def diamond(y):
+        return polyline([(4, y), (16, y - 6), (28, y), (16, y + 6), (4, y)], 2.4)
+
+    yield "layers", AMBER, union(diamond(10), diamond(16), diamond(22))
+    # Fill: a droplet.
+    yield "fill", MINT, union(
+        polyline([(16, 3), (9, 15)], 2.8),
+        polyline([(16, 3), (23, 15)], 2.8),
+        circle(16, 19, 8, width=2.8),
+    )
+    # Edge angle: two edges meeting, with an arc.
+    yield "angle", SKY, union(
+        polyline([(4, 26), (28, 26)], 2.6),
+        polyline([(4, 26), (22, 6)], 2.6),
+        polyline([(4 + 12 * math.cos(math.radians(a)), 26 - 12 * math.sin(math.radians(a))) for a in range(0, 49, 6)], 2.2),
+    )
+    # Saved selections: a list with checks.
+    yield "selection", LILAC, union(
+        *(rect(4, y - 3, 10, y + 3, 2.0) for y in (7, 16, 25)),
+        *(polyline([(14, y), (28, y)], 2.4) for y in (7, 16, 25)),
+    )
+    # Export: an arrow leaving a tray.
+    yield "export", SKY, union(
+        polyline([(5, 18), (5, 27), (27, 27), (27, 18)], 2.6),
+        polyline([(16, 21), (16, 4)], 2.6),
+        polyline([(10, 10), (16, 4), (22, 10)], 2.6),
+    )
 
 
 def main():

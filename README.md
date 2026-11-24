@@ -19,6 +19,7 @@ Texture sets come out of Substance 3D Painter, Designer and game pipelines in ma
 - **Refresh** reloads every texture from disk and picks up maps you exported later. **Auto Reload** does it for you while you paint.
 - **Match Authoring View** switches to a neutral view transform for side-by-side checks with Painter, and back.
 - Existing node setups are kept aside in a frame, never deleted, unless you ask for a clean rebuild.
+- **Blend**: paint RGBA blend masks on meshes, one channel at a time, in layers. Set, erase or randomize selections, find edges by angle, keep selections in a list, and export the mask as vertex colors your engine's shader reads.
 
 ## Presets
 
@@ -51,7 +52,9 @@ GitHub's automatic "Source code" archives are not installable add-ons. Use the `
 
 ## Usage
 
-Open the sidebar in the 3D Viewport or the Shader Editor (`N`) and go to the **LiveMat** tab.
+Open the sidebar in the 3D Viewport or the Shader Editor (`N`) and go to the **LiveMat** tab. The icons on its left switch between **Build** (materials from texture folders), **Blend** (vertex color masks) and **Templates** (your own presets, coming in a later version).
+
+### Build
 
 1. Pick the texture folder and a preset (the field stays red until you do), then press **Scan Folder**. Each texture set shows up with the material it matched, or **New** when there's none.
 2. Click a set to preview its maps, change its target material, or **Assign to Selected** objects.
@@ -69,6 +72,23 @@ The **Material** panel (in the sidebar and under **Material Properties**) shows 
 Blender never re-reads an image by itself, so after exporting from Painter again, press **Refresh**, or turn on **Auto** and keep painting. Auto Reload checks the files every second, waits until a file stops changing, and also catches up on exports made while it was off. With Auto off, the panel warns when textures changed on disk and highlights **Refresh**. New maps only show up with **Refresh**.
 
 **Neutral View** switches to a neutral view transform and keeps Material Preview's lighting fixed in the world, as game engines do. Press it again to get your settings back.
+
+### Blend
+
+Blend paints an RGBA mask on a mesh, the kind shaders use to blend materials or add edge wear and dirt. Each channel is edited on its own and holds a stack of layers, like masks in Painter: a layer can be hidden, faded with **Opacity** or blended with **Add**, **Subtract**, **Multiply**, **Lighten** or **Darken**. LiveMat blends the layers into one color attribute, **LiveMat Blend**, which is what gets exported.
+
+1. Select a mesh and press **Add Blend Mask** in the **Blend** tab.
+2. Pick a channel with the **R**, **G**, **B**, **A** chips. **Mask** shows the RGBA result in the viewport, **Channel** shows the active channel in grayscale, **Material** goes back to your shading.
+3. In Edit Mode, select vertices, edges or faces and use **Fill**:
+   - **Set** writes the value, **Erase** writes 0, **Clear** makes the layer transparent there so the layers below show.
+   - **Randomize** writes random values between **Min** and **Max**, one per vertex, polygon, connected element or selected edge. **Fixed Seed** repeats the same values.
+   - **Smooth Polygons** on lets face selections fade into their neighbors; off gives a hard border.
+4. **Edge Angle** selects convex edges (ridges), concave edges (valleys) or both within an angle range, inside the selection or across the whole mesh, as edges, their vertices or the faces on both sides. Fill them for edge wear or corner dirt.
+5. **Selections** keeps selections for later: **+** adds the current one to the list, clicking an item selects it again (Shift+click adds to the current selection). Tick several and **Combine** them as a union, intersection or subtraction.
+
+Everything is stored on the mesh, so it's saved with the .blend and shared by linked duplicates. The layers and saved selections are hidden attributes that FBX doesn't export.
+
+**Export.** Unity and Unreal read only the first color set of an FBX, and LiveMat stores the mask so Blender's default FBX settings deliver the exact values (a value of 0.5 arrives as 128/255). The **Export** section warns when another color attribute would be exported first and fixes it with **Export the Mask First**, which keeps that attribute's data. **Check FBX Export** exports the object to a temporary file, reads it back and confirms the engine gets the same values.
 
 ### Normal maps and tangents
 
@@ -108,6 +128,8 @@ The zip lands in `release/`. Run the tests in a headless Blender:
 **Author:** Tom Berczeller
 
 The spec/gloss conversion follows the [Khronos glTF](https://github.com/KhronosGroup/glTF) `KHR_materials_pbrSpecularGlossiness` conversion notes.
+
+The Blend tools are inspired by Damian Lazarski's Vertex Color Channel Tool for 3ds Max.
 
 ## License
 

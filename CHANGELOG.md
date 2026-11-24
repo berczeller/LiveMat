@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here. The format follows Keep a Changelog and the project uses Semantic Versioning.
 
+## [Unreleased]
+
+### Added
+- **Blend** tab: RGBA blend masks on meshes, exported as vertex colors. Each channel has a stack of layers with opacity and blend modes.
+- Edit Mode tools to set, erase, clear or randomize a channel on the selection, per vertex, polygon, element or edge.
+- Select by edge angle: convex, concave or both, within an angle range.
+- Saved selections that can be selected again and combined.
+- Export checks that make sure engines read the mask as the first vertex color set, with a one-click fix and an FBX round-trip test.
+
+### Changed
+- The sidebar panel has side tabs for Build, Blend and Templates. The Material inspector moved into the Build tab.
+
 ## [0.2.0] - 2026-11-24
 
 ### Changed

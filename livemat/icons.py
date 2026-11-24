@@ -19,6 +19,14 @@ NAMES = (
     "channel_g",
     "channel_b",
     "channel_a",
+    "build",
+    "blend",
+    "templates",
+    "layers",
+    "fill",
+    "angle",
+    "selection",
+    "export",
 )
 _DIR = pathlib.Path(__file__).parent / "icons"
 _previews = None

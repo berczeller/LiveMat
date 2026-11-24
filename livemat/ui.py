@@ -6,7 +6,8 @@ the Shader Editor sidebar and Material Properties."""
 
 import bpy
 
-from . import icons, registry, thumbs, watch
+from . import icons, registry, templates, thumbs, watch
+from .blend import ui as blend_ui
 from .build import material as builder
 from .build import nodegroup, tangents
 from .operators import plural
@@ -317,6 +318,19 @@ class LIVEMAT_UL_sets(bpy.types.UIList):
 
 # Panels
 
+# Side tabs, like Zen UV: an icon column on the left picks the section on the right.
+TABS = (
+    ("BUILD", "Build", "Build materials from texture folders", "build"),
+    ("BLEND", "Blend", "Paint RGBA blend masks the engine reads as vertex colors", "blend"),
+    ("TEMPLATES", "Templates", "Your own presets. Coming in a later version", "templates"),
+)
+_tab_items = []  # kept alive: Blender doesn't copy enum item strings
+
+
+def _tabs(_self, _context):
+    _tab_items[:] = [(key, label, tip, icons.get(icon), number) for number, (key, label, tip, icon) in enumerate(TABS)]
+    return _tab_items
+
 
 class _Sidebar:
     bl_region_type = "UI"
@@ -330,33 +344,31 @@ class _MainPanel(_Sidebar):
         self.layout.label(icon_value=icons.get("livemat"))
 
     def draw(self, context):
-        props = context.scene.livemat
-        draw_source(self.layout, props)
-        draw_sets(self.layout, props)
-
-
-class _MaterialPanel(_Sidebar):
-    bl_label = "Material"
-
-    def draw_header(self, _context):
-        self.layout.label(icon="MATERIAL")
-
-    def draw(self, context):
-        draw_material(self.layout, active_material(context))
+        wm = context.window_manager
+        row = self.layout.row()
+        tabs = row.column(align=True)
+        tabs.ui_units_x = 1.6
+        tabs.scale_y = 1.4
+        for key, _label, _tip, icon in TABS:
+            tabs.prop_enum(wm, "livemat_tab", key, text="", icon_value=icons.get(icon))
+        content = row.column()
+        if wm.livemat_tab == "BLEND":
+            blend_ui.draw(content, context, section, end_section)
+        elif wm.livemat_tab == "TEMPLATES":
+            templates.draw(content, section, end_section)
+        else:
+            props = context.scene.livemat
+            draw_source(content, props)
+            draw_sets(content, props)
+            draw_material(content, active_material(context))
 
 
 def _sidebar_panels(space, prefix, poll=None):
-    """The main panel and its Material child for one editor."""
+    """The tabbed LiveMat panel for one editor."""
     main = type(f"LIVEMAT_PT_{prefix}", (_MainPanel, bpy.types.Panel), {"bl_space_type": space})
-    child = type(
-        f"LIVEMAT_PT_{prefix}_material",
-        (_MaterialPanel, bpy.types.Panel),
-        {"bl_space_type": space, "bl_parent_id": main.__name__},
-    )
     if poll is not None:
-        for cls in (main, child):
-            cls.poll = classmethod(poll)
-    return (main, child)
+        main.poll = classmethod(poll)
+    return (main,)
 
 
 def _is_shader_editor(_cls, context):
@@ -381,7 +393,7 @@ class LIVEMAT_PT_material(bpy.types.Panel):
         draw_material(self.layout, context.material)
 
 
-register, unregister = bpy.utils.register_classes_factory(
+_register_classes, _unregister_classes = bpy.utils.register_classes_factory(
     (
         LIVEMAT_MT_switch_preset,
         LIVEMAT_UL_sets,
@@ -390,3 +402,14 @@ register, unregister = bpy.utils.register_classes_factory(
         LIVEMAT_PT_material,
     )
 )
+
+
+def register():
+    # Which tab is open is a view choice: on the window manager, so it isn't saved or undone.
+    bpy.types.WindowManager.livemat_tab = bpy.props.EnumProperty(name="LiveMat Section", items=_tabs, default=0)
+    _register_classes()
+
+
+def unregister():
+    _unregister_classes()
+    del bpy.types.WindowManager.livemat_tab
