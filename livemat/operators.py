@@ -337,6 +337,9 @@ class LIVEMAT_OT_refresh(bpy.types.Operator):
                 no_tangents.update(tangents.update_users(material))
         images = refresh.livemat_images(materials)
         reloaded = refresh.reload_images(images)
+        from .blend import material as blend_material
+
+        blend_material.rebuild_all()  # Blend materials copy their sources' nodes
         watch.clear_stale()
         thumbs.forget(bpy.path.abspath(i.filepath) for i in images)
         refresh.redraw_all()

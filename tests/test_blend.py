@@ -518,3 +518,110 @@ class PolygonFillTest(BlendTestBase):
         self.assertTrue(all(values[i] == 128 for i in self.corners_of_face(0)))
         fill_tool.apply(self.mesh, {0}, 0.5, clear=True)
         self.assertEqual(int(final_values(self.mesh).sum()), 0)
+
+
+class BlendMaterialTest(BlendTestBase):
+    """Renders compare the Blend material with its sources, so the mask decoding and mixing are checked numerically."""
+
+    def setUp(self):
+        super().setUp()
+        import tempfile
+
+        from tests.fixtures import make_texture_set
+
+        self._tmp = tempfile.TemporaryDirectory()
+        folder = self._tmp.name
+        make_texture_set(folder, "Brick", {"_BaseColor": (200, 40, 40), "_Roughness": (230,)})
+        make_texture_set(folder, "Moss", {"_BaseColor": (40, 160, 60), "_Roughness": (230,)})
+        props = bpy.context.scene.livemat
+        props.folder = folder
+        props.preset = "default_metal_rough"
+        props.create_missing = True
+        bpy.ops.livemat.build()
+        self.brick = bpy.data.materials["Brick"]
+        self.moss = bpy.data.materials["Moss"]
+
+        scene = bpy.context.scene
+        scene.render.engine = "CYCLES"
+        scene.cycles.samples = 16
+        scene.cycles.use_denoising = False
+        scene.render.resolution_x = scene.render.resolution_y = 2
+        scene.render.image_settings.file_format = "OPEN_EXR"
+        if scene.world is None:
+            scene.world = bpy.data.worlds.new("World")
+        scene.world.color = (1.0, 1.0, 1.0)
+        bpy.ops.object.camera_add(location=(0, 0, 5))
+        camera = bpy.context.active_object
+        camera.data.type = "ORTHO"
+        camera.data.ortho_scale = 0.5
+        scene.camera = camera
+        bpy.context.view_layer.objects.active = self.obj
+        self.obj.select_set(True)
+        self.obj.data.materials.clear()
+        self.obj.data.materials.append(self.brick)
+
+    def tearDown(self):
+        super().tearDown()
+        for collection in (bpy.data.materials, bpy.data.node_groups, bpy.data.images, bpy.data.cameras):
+            for block in list(collection):
+                collection.remove(block)
+        self._tmp.cleanup()
+
+    def render(self):
+        import os
+
+        path = os.path.join(self._tmp.name, "probe.exr")
+        bpy.context.scene.render.filepath = path
+        bpy.ops.render.render(write_still=True)
+        image = bpy.data.images.load(path)
+        pixel = tuple(image.pixels[:3])
+        bpy.data.images.remove(image)
+        return pixel
+
+    def set_mask_r(self, value):
+        from livemat.blend import fill_tool
+
+        fill_tool.apply(self.mesh, range(len(self.mesh.polygons)), value)
+
+    def assertPixel(self, got, want, delta):
+        for a, b in zip(got, want):
+            self.assertAlmostEqual(a, b, delta=delta)
+
+    def test_blend_follows_the_mask(self):
+        brick = self.render()
+        self.obj.active_material = self.moss
+        moss = self.render()
+        self.obj.active_material = self.brick
+
+        bpy.ops.livemat.blend_material_create()
+        blend = self.obj.active_material
+        setup = blend.livemat_blend_material
+        self.assertEqual(setup.base, self.brick)
+        setup.layer_r = self.moss
+        setup.use_height = False
+
+        self.set_mask_r(0.0)
+        self.assertPixel(self.render(), brick, 0.02)
+        self.set_mask_r(1.0)
+        self.assertPixel(self.render(), moss, 0.02)
+        # Byte 128 has to blend halfway: decoding the mask as linear would give 0.216 instead.
+        self.set_mask_r(0.5)
+        middle = tuple((a + b) / 2 for a, b in zip(brick, moss))
+        self.assertPixel(self.render(), middle, 0.02)
+
+    def test_height_blend_keeps_the_ends(self):
+        bpy.ops.livemat.blend_material_create()
+        blend = self.obj.active_material
+        blend.livemat_blend_material.layer_r = self.moss
+        self.set_mask_r(0.0)
+        brick_like = self.render()
+        self.obj.active_material = self.brick
+        self.assertPixel(brick_like, self.render(), 0.02)
+
+    def test_only_livemat_materials_can_be_picked(self):
+        from livemat.blend import material
+
+        self.assertTrue(material.is_source(self.brick))
+        self.assertFalse(material.is_source(bpy.data.materials.new("Plain")))
+        bpy.ops.livemat.blend_material_create()
+        self.assertFalse(material.is_source(self.obj.active_material))

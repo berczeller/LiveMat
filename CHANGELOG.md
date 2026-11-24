@@ -12,10 +12,12 @@ All notable changes to this project are documented here. The format follows Keep
 - Export checks that make sure engines read the mask as the first vertex color set, with a one-click fix and an FBX round-trip test.
 - Three layer kinds: Fill, Paint (painted with Blender's vertex paint brushes, with live preview) and Generator.
 - Polygon Fill tool: click a polygon or drag a rectangle in the viewport to fill it, by polygon, connected mesh or UV island, with intersection or center hit-testing and visible polygons only. A highlight shows what will be filled.
+- Blend materials: a base LiveMat material with one more per mask channel, mixed property by property (color, metallic, roughness, normal, height, alpha, emission) with a generic height blend, previewed live.
 - Generators baked from the mesh: Ambient Occlusion, Thickness and Curvature with Cycles, and Edge Wear from face angles. Low, High and Invert remap them live without baking again.
 
 ### Changed
 - The sidebar panel has side tabs for Build, Blend and Templates. The Material inspector moved into the Build tab.
+- Preset node groups also output their surface (base color, metallic, roughness, normal, height, alpha, emission) next to the BSDF.
 
 ## [0.2.0] - 2026-11-24
 

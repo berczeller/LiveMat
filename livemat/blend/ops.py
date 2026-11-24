@@ -407,6 +407,44 @@ class LIVEMAT_OT_blend_view(_MeshOperator, bpy.types.Operator):
         return {"FINISHED"}
 
 
+# Blend materials
+
+
+class LIVEMAT_OT_blend_material_create(_MeshOperator, bpy.types.Operator):
+    bl_idname = "livemat.blend_material_create"
+    bl_label = "Create Blend Material"
+    bl_description = "Make a material that blends LiveMat materials by this mesh's mask, based on its current material"
+
+    def execute(self, context):
+        from . import material
+
+        created = material.create(context.object)
+        self.report({"INFO"}, f"Created {created.name}. Pick a material for each channel")
+        return {"FINISHED"}
+
+
+class LIVEMAT_OT_blend_material_rebuild(bpy.types.Operator):
+    bl_idname = "livemat.blend_material_rebuild"
+    bl_label = "Rebuild Blend Material"
+    bl_description = "Rebuild this Blend material from its source materials"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        from . import material
+
+        obj = context.object
+        return obj is not None and obj.active_material is not None and obj.active_material.get(material.TAG)
+
+    def execute(self, context):
+        from . import material
+
+        problem = material.build(context.object.active_material)
+        if problem:
+            self.report({"WARNING"}, problem)
+        return {"FINISHED"}
+
+
 # Export
 
 
@@ -456,6 +494,8 @@ register, unregister = bpy.utils.register_classes_factory(
         LIVEMAT_OT_blend_layer_remove,
         LIVEMAT_OT_blend_layer_move,
         LIVEMAT_OT_blend_view,
+        LIVEMAT_OT_blend_material_create,
+        LIVEMAT_OT_blend_material_rebuild,
         LIVEMAT_OT_blend_move_first,
         LIVEMAT_OT_blend_check,
     )

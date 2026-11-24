@@ -14,7 +14,7 @@ import bpy
 from ..core.presets import SEMANTIC_DEFAULTS
 
 # Bump this when the generated node layout changes, so existing groups rebuild.
-BUILDER_VERSION = 4
+BUILDER_VERSION = 5
 
 GROUP_PREFIX = "LiveMat "
 SHADER_OUTPUT = "BSDF"
@@ -355,6 +355,42 @@ def _build(group, preset):
         links.new(shading_normal, bsdf.inputs["Normal"])
 
     links.new(bsdf.outputs["BSDF"], group_out.inputs[SHADER_OUTPUT])
+    _surface_outputs(group, graph, bsdf, group_out, values.get("height"))
+
+
+# Surface outputs next to the BSDF, so Blend materials can mix properties
+# (like engine shaders do) instead of mixing whole shaders.
+# name, socket type, Principled input it mirrors (None: Height), default
+SURFACE_OUTPUTS = (
+    ("Base Color", "NodeSocketColor", "Base Color", (0.8, 0.8, 0.8, 1.0)),
+    ("Metallic", "NodeSocketFloat", "Metallic", 0.0),
+    ("Roughness", "NodeSocketFloat", "Roughness", 0.5),
+    ("Normal", "NodeSocketVector", "Normal", (0.0, 0.0, 0.0)),
+    ("Height", "NodeSocketFloat", None, 0.5),
+    ("Alpha", "NodeSocketFloat", "Alpha", 1.0),
+    ("Emission", "NodeSocketColor", "Emission Color", (0.0, 0.0, 0.0, 1.0)),
+)
+
+
+def _surface_outputs(group, graph, bsdf, group_out, height):
+    iface = group.interface
+    links = graph.links
+    for name, kind, bsdf_input, default in SURFACE_OUTPUTS:
+        socket = iface.new_socket(name, in_out="OUTPUT", socket_type=kind)
+        socket.default_value = default
+        if bsdf_input is None:
+            source = height
+        elif bsdf.inputs[bsdf_input].is_linked:
+            source = bsdf.inputs[bsdf_input].links[0].from_socket
+        else:
+            source = None
+        if name == "Normal" and source is None:
+            # No normal map: hand out the surface normal, so blending normals still works.
+            source = graph.new("ShaderNodeNewGeometry", 6).outputs["Normal"]
+        if name == "Emission" and source is not None and bsdf.inputs["Emission Strength"].is_linked:
+            source = graph.vector("SCALE", 7, source, scale=bsdf.inputs["Emission Strength"].links[0].from_socket)
+        if source is not None:
+            links.new(source, group_out.inputs[name])
 
 
 def _to_opengl(graph, color, preset):

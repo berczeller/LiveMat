@@ -207,6 +207,31 @@ def draw(layout, context, section, end_section):
             hint.label(text="Click a selection to select it again", icon="INFO")
     end_section(body)
 
+    # Blend material
+    body = section(layout, "Blend Material", "blend")
+    material = obj.active_material
+    if material is not None and material.get("livemat_is_blend"):
+        setup = material.livemat_blend_material
+        col = body.column(align=True)
+        col.prop(setup, "base", text="Base")
+        for channel in data.CHANNELS:
+            row = col.row(align=True)
+            row.label(text="", icon_value=icons.get(f"channel_{channel.lower()}"))
+            row.prop(setup, f"layer_{channel.lower()}", text="")
+        col = body.column(align=True)
+        col.prop(setup, "use_height")
+        sub = col.column(align=True)
+        sub.active = setup.use_height
+        sub.prop(setup, "height_influence", slider=True)
+        sub.prop(setup, "transition", slider=True)
+        body.operator("livemat.blend_material_rebuild", icon="FILE_REFRESH")
+    else:
+        hint = body.row()
+        hint.enabled = False
+        hint.label(text="Preview LiveMat materials blended by this mask", icon="INFO")
+        body.operator("livemat.blend_material_create", icon="NODE_MATERIAL")
+    end_section(body)
+
     # Export
     body = section(layout, "Export", "export")
     problems = export.issues(mesh)

@@ -20,6 +20,7 @@ def livemat_materials():
         m
         for m in bpy.data.materials
         if m.get("livemat_preset") and m.library is None and m.node_tree is not None
+        and not m.get("livemat_is_blend")  # Blend materials rebuild from their sources
     ]
 
 

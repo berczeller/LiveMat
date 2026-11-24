@@ -201,7 +201,46 @@ class LiveMatBlendTool(bpy.types.PropertyGroup):
     )
 
 
-_classes = (LiveMatBlendLayer, LiveMatSelectionSet, LiveMatBlendMesh, LiveMatBlendTool)
+def _rebuild_material(self, _context):
+    from . import material
+
+    if self.id_data.get(material.TAG):
+        material.build(self.id_data)
+
+
+def _source_poll(_self, candidate):
+    from . import material
+
+    return material.is_source(candidate)
+
+
+def _source(name, description):
+    return PointerProperty(type=bpy.types.Material, name=name, description=description, poll=_source_poll, update=_rebuild_material)
+
+
+class LiveMatBlendMaterial(bpy.types.PropertyGroup):
+    """A Blend material: a base material with others blended over it by the mask channels."""
+
+    base: _source("Base", "Material underneath everything")
+    layer_r: _source("R", "Material shown where the red channel is high")
+    layer_g: _source("G", "Material shown where the green channel is high")
+    layer_b: _source("B", "Material shown where the blue channel is high")
+    layer_a: _source("A", "Material shown where the alpha channel is high")
+    use_height: BoolProperty(
+        name="Height Blend", default=True, update=_rebuild_material,
+        description="Use each layer's height map to shape where it comes in. Off: plain linear blend by the mask",
+    )
+    height_influence: FloatProperty(
+        name="Height Influence", default=0.5, min=0.0, max=1.0, subtype="FACTOR", update=_rebuild_material,
+        description="How much the height map moves the edge of a layer",
+    )
+    transition: FloatProperty(
+        name="Transition", default=0.2, min=0.01, max=1.0, subtype="FACTOR", update=_rebuild_material,
+        description="How soft the edge between layers is",
+    )
+
+
+_classes = (LiveMatBlendLayer, LiveMatSelectionSet, LiveMatBlendMesh, LiveMatBlendTool, LiveMatBlendMaterial)
 
 
 def register():
@@ -209,9 +248,11 @@ def register():
         bpy.utils.register_class(cls)
     bpy.types.Mesh.livemat_blend = PointerProperty(type=LiveMatBlendMesh)
     bpy.types.Scene.livemat_blend_tool = PointerProperty(type=LiveMatBlendTool)
+    bpy.types.Material.livemat_blend_material = PointerProperty(type=LiveMatBlendMaterial)
 
 
 def unregister():
+    del bpy.types.Material.livemat_blend_material
     del bpy.types.Scene.livemat_blend_tool
     del bpy.types.Mesh.livemat_blend
     for cls in reversed(_classes):
