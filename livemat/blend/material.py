@@ -177,16 +177,31 @@ def build(material):
     base_node = source_node(base, 0)
     surface = {name: base_node.outputs[name] for name in SURFACE}
 
-    mask = g.new("ShaderNodeVertexColor", 0, layer_name=data.FINAL)
-    mask.label = "Blend Mask"
-    split = g.new("ShaderNodeSeparateColor", 1)
-    g.links.new(mask.outputs["Color"], split.inputs["Color"])
-    channels = {
-        "R": _srgb_encode(g, split.outputs["Red"], 2),
-        "G": _srgb_encode(g, split.outputs["Green"], 2),
-        "B": _srgb_encode(g, split.outputs["Blue"], 2),
-        "A": mask.outputs["Alpha"],  # alpha is stored linear
-    }
+    if setup.mask_source == "TEXTURE":
+        channels = {}
+        for channel in data.CHANNELS:
+            image = getattr(setup, f"image_{channel.lower()}")
+            if image is None:
+                zero = g.new("ShaderNodeValue", 1)
+                zero.outputs[0].default_value = 0.0
+                channels[channel] = zero.outputs[0]
+                continue
+            node = g.new("ShaderNodeTexImage", 1)
+            node.image = image
+            node.label = f"Mask {channel}"
+            node.interpolation = "Linear"
+            channels[channel] = node.outputs["Color"]  # grayscale, Non-Color: the value as painted
+    else:
+        mask = g.new("ShaderNodeVertexColor", 0, layer_name=data.FINAL)
+        mask.label = "Blend Mask"
+        split = g.new("ShaderNodeSeparateColor", 1)
+        g.links.new(mask.outputs["Color"], split.inputs["Color"])
+        channels = {
+            "R": _srgb_encode(g, split.outputs["Red"], 2),
+            "G": _srgb_encode(g, split.outputs["Green"], 2),
+            "B": _srgb_encode(g, split.outputs["Blue"], 2),
+            "A": mask.outputs["Alpha"],  # alpha is stored linear
+        }
 
     column = 5
     for channel in data.CHANNELS:

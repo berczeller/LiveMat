@@ -625,3 +625,91 @@ class BlendMaterialTest(BlendTestBase):
         self.assertFalse(material.is_source(bpy.data.materials.new("Plain")))
         bpy.ops.livemat.blend_material_create()
         self.assertFalse(material.is_source(self.obj.active_material))
+
+
+class PixelMaskTest(BlendMaterialTest):
+    """Texture masks: render comparisons, conversions both ways, and export layouts."""
+
+    def make_blend(self):
+        bpy.ops.livemat.blend_material_create()
+        blend = self.obj.active_material
+        setup = blend.livemat_blend_material
+        setup.layer_r = self.moss
+        setup.use_height = False
+        setup.resolution = "512"
+        return blend
+
+    def fill_image(self, blend, channel, value):
+        from livemat.blend import texture
+
+        image = texture.channel_image(blend, channel, create=True)
+        texture.write_gray(image, np.full((image.size[1], image.size[0]), value, dtype=np.float32))
+        blend.livemat_blend_material.mask_source = "TEXTURE"
+        from livemat.blend import material
+
+        material.build(blend)
+
+    def test_texture_mask_drives_the_blend(self):
+        brick = self.render()
+        self.obj.active_material = self.moss
+        moss = self.render()
+        self.obj.active_material = self.brick
+        blend = self.make_blend()
+        self.fill_image(blend, "R", 0.0)
+        self.assertPixel(self.render(), brick, 0.02)
+        self.fill_image(blend, "R", 1.0)
+        self.assertPixel(self.render(), moss, 0.02)
+
+    def test_vertex_to_texture(self):
+        from livemat.blend import texture
+
+        blend = self.make_blend()
+        self.set_mask_r(1.0)
+        bpy.ops.livemat.blend_mask_convert(direction="TO_TEXTURE")
+        self.assertEqual(blend.livemat_blend_material.mask_source, "TEXTURE")
+        uvs = np.zeros(len(self.mesh.loops) * 2, dtype=np.float32)
+        self.mesh.uv_layers.active.data.foreach_get("uv", uvs)
+        uvs = uvs.reshape(-1, 2)
+        polygon = self.mesh.polygons[0]
+        center = uvs[polygon.loop_start:polygon.loop_start + polygon.loop_total].mean(axis=0, keepdims=True)
+        red = texture.read_gray(blend.livemat_blend_material.image_r)
+        green = texture.read_gray(blend.livemat_blend_material.image_g)
+        self.assertAlmostEqual(float(texture.sample(red, center)[0]), 1.0, places=2)
+        self.assertAlmostEqual(float(texture.sample(green, center)[0]), 0.0, places=2)
+
+    def test_texture_to_vertex(self):
+        blend = self.make_blend()
+        self.fill_image(blend, "R", 0.5)
+        bpy.ops.livemat.blend_mask_convert(direction="TO_VERTEX")
+        self.assertEqual(blend.livemat_blend_material.mask_source, "VERTEX")
+        values = final_values(self.mesh)
+        self.assertTrue(np.all(np.abs(values - 128) <= 1), values[:8])
+        self.assertEqual(self.mesh.livemat_blend.layers_r[0].name, "From Texture")
+
+    def test_export_layouts(self):
+        import os
+
+        from livemat.blend import texture
+
+        blend = self.make_blend()
+        self.fill_image(blend, "R", 1.0)
+        self.fill_image(blend, "G", 1.0)
+        folder = os.path.join(self._tmp.name, "out")
+
+        paths = texture.export(blend, folder, "mask", "GENERIC", "PNG")
+        self.assertEqual([os.path.basename(p) for p in paths], ["mask_mask.png"])
+        image = bpy.data.images.load(paths[0])
+        image.colorspace_settings.name = "Non-Color"
+        pixel = tuple(round(v, 2) for v in image.pixels[:4])
+        bpy.data.images.remove(image)
+        self.assertEqual(pixel, (1.0, 1.0, 0.0, 0.0))
+
+        paths = texture.export(blend, folder, "terrain", "UNITY_TERRAIN", "TARGA")
+        image = bpy.data.images.load(paths[0])
+        image.colorspace_settings.name = "Non-Color"
+        pixel = tuple(round(v, 2) for v in image.pixels[:4])
+        bpy.data.images.remove(image)
+        self.assertEqual(pixel, (0.5, 0.5, 0.0, 0.0))  # weights add up to 1
+
+        paths = texture.export(blend, folder, "land", "UNREAL_LANDSCAPE", "PNG")
+        self.assertEqual(sorted(os.path.basename(p) for p in paths), ["land_A.png", "land_B.png", "land_G.png", "land_R.png"])

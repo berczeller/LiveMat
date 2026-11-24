@@ -224,6 +224,22 @@ def draw(layout, context, section, end_section):
         sub.active = setup.use_height
         sub.prop(setup, "height_influence", slider=True)
         sub.prop(setup, "transition", slider=True)
+        body.separator(factor=0.5)
+        body.row(align=True).prop(setup, "mask_source", expand=True)
+        if setup.mask_source == "TEXTURE":
+            body.prop(setup, "resolution")
+            row = body.row(align=True)
+            for channel in data.CHANNELS:
+                row.operator(
+                    "livemat.blend_mask_paint", text="", icon_value=icons.get(f"channel_{channel.lower()}")
+                ).channel = channel
+            if context.mode == "PAINT_TEXTURE":
+                done = body.row()
+                done.active_default = True
+                done.operator("livemat.blend_mask_done", icon="CHECKMARK")
+            body.operator("livemat.blend_mask_convert", text="Textures to Vertex Colors", icon="VPAINT_HLT").direction = "TO_VERTEX"
+        else:
+            body.operator("livemat.blend_mask_convert", text="Vertex Colors to Textures", icon="TPAINT_HLT").direction = "TO_TEXTURE"
         body.operator("livemat.blend_material_rebuild", icon="FILE_REFRESH")
     else:
         hint = body.row()
@@ -246,6 +262,20 @@ def draw(layout, context, section, end_section):
         row.enabled = False
         row.label(text="Exported as vertex color set 1", icon="CHECKMARK")
     body.operator("livemat.blend_check", icon="EXPORT")
+    if material is not None and material.get("livemat_is_blend"):
+        body.separator(factor=0.6)
+        body.label(text="Mask Textures")
+        col = body.column(align=True)
+        col.prop(tool, "export_preset", text="")
+        row = col.row(align=True)
+        row.prop(tool, "export_format", expand=True)
+        col.prop(tool, "export_folder", text="")
+        body.operator("livemat.blend_mask_export", icon="IMAGE_DATA")
+        from .texture import IMPORT_NOTES
+
+        note = body.row()
+        note.enabled = False
+        note.label(text=IMPORT_NOTES[tool.export_preset], icon="INFO")
     end_section(body)
 
 

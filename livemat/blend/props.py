@@ -28,6 +28,16 @@ def _channels(_self, _context):
     return _channel_items
 
 
+_export_items = []
+
+
+def _export_presets():
+    from . import texture
+
+    _export_items[:] = list(texture.EXPORT_PRESETS)
+    return _export_items
+
+
 def _recomposite(self, _context):
     mesh = self.id_data
     # Only meshes that already have a mask: setting a value elsewhere mustn't create one.
@@ -190,6 +200,11 @@ class LiveMatBlendTool(bpy.types.PropertyGroup):
         default="INTERSECT",
     )
     visible_only: BoolProperty(name="Visible Only", default=True, description="A rectangle skips polygons hidden behind others")
+    export_preset: EnumProperty(name="Layout", items=lambda self, context: _export_presets(), default=0)
+    export_format: EnumProperty(
+        name="Format", items=[("PNG", "PNG", "8-bit PNG"), ("TARGA", "TGA", "8-bit TGA")], default="PNG"
+    )
+    export_folder: StringProperty(name="Folder", subtype="DIR_PATH", description="Where mask textures are saved")
     combine: EnumProperty(
         name="Combine",
         items=[
@@ -238,6 +253,25 @@ class LiveMatBlendMaterial(bpy.types.PropertyGroup):
         name="Transition", default=0.2, min=0.01, max=1.0, subtype="FACTOR", update=_rebuild_material,
         description="How soft the edge between layers is",
     )
+    mask_source: EnumProperty(
+        name="Mask",
+        items=[
+            ("VERTEX", "Vertex Colors", "Read the mask from the Blend vertex colors", "VPAINT_HLT", 0),
+            ("TEXTURE", "Textures", "Read the mask from one painted image per channel, through the UVs", "TPAINT_HLT", 1),
+        ],
+        default="VERTEX",
+        update=_rebuild_material,
+    )
+    resolution: EnumProperty(
+        name="Resolution",
+        items=[(str(s), f"{s} px", f"{s} by {s} pixels") for s in (512, 1024, 2048, 4096)],
+        default="2048",
+        description="Size of new mask images and of exported masks",
+    )
+    image_r: PointerProperty(type=bpy.types.Image, update=_rebuild_material)
+    image_g: PointerProperty(type=bpy.types.Image, update=_rebuild_material)
+    image_b: PointerProperty(type=bpy.types.Image, update=_rebuild_material)
+    image_a: PointerProperty(type=bpy.types.Image, update=_rebuild_material)
 
 
 _classes = (LiveMatBlendLayer, LiveMatSelectionSet, LiveMatBlendMesh, LiveMatBlendTool, LiveMatBlendMaterial)

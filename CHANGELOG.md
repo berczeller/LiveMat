@@ -13,6 +13,8 @@ All notable changes to this project are documented here. The format follows Keep
 - Three layer kinds: Fill, Paint (painted with Blender's vertex paint brushes, with live preview) and Generator.
 - Polygon Fill tool: click a polygon or drag a rectangle in the viewport to fill it, by polygon, connected mesh or UV island, with intersection or center hit-testing and visible polygons only. A highlight shows what will be filled.
 - Blend materials: a base LiveMat material with one more per mask channel, mixed property by property (color, metallic, roughness, normal, height, alpha, emission) with a generic height blend, previewed live.
+- Pixel masks: a Blend material can read its mask from one painted texture per channel instead of vertex colors. Convert between vertex colors and textures in both directions.
+- Export mask textures in the layouts of Unity HDRP LayeredLit, Unity Terrain splatmaps, Unreal (packed or landscape layers), Godot or plain RGBA, as 8-bit PNG or TGA.
 - Generators baked from the mesh: Ambient Occlusion, Thickness and Curvature with Cycles, and Edge Wear from face angles. Low, High and Invert remap them live without baking again.
 
 ### Changed
