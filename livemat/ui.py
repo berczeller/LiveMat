@@ -8,7 +8,7 @@ import bpy
 
 from . import icons, registry, thumbs, watch
 from .build import material as builder
-from .build import nodegroup
+from .build import nodegroup, tangents
 from .operators import plural
 
 SEMANTIC_NAMES = {
@@ -209,11 +209,13 @@ def draw_material(layout, material):
 
     if state is not None:
         body = section(layout, "Normals", "normals")
-        body.row().prop(state, "tangents", expand=True)
-        if state.tangents == "UNITY":
-            hint = body.row()
-            hint.enabled = False
-            hint.label(text="Press Refresh after editing the meshes", icon="INFO")
+        row = body.split(factor=0.34)
+        row.label(text="Baked For")
+        row.prop(state, "tangents", text="")
+        hint = body.row()
+        hint.enabled = False
+        per_vertex = state.tangents in tangents.PER_VERTEX
+        hint.label(text="Per-vertex bitangent" if per_vertex else "Per-pixel bitangent", icon="INFO")
         end_section(body)
 
 

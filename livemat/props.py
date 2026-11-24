@@ -60,13 +60,25 @@ class LiveMatSlotState(bpy.types.PropertyGroup):
 class LiveMatMaterial(bpy.types.PropertyGroup):
     slots: CollectionProperty(type=LiveMatSlotState)
     tangents: EnumProperty(
-        name="Tangents",
+        name="Tangent Space",
+        # Numbers 0 and 1 are what files saved by 0.1.x store, so they keep their meaning.
         items=[
-            ("BLENDER", "Blender", "Per-pixel bitangent, like Blender, Unreal and Unity HDRP", 0),
-            ("UNITY", "Unity", "Per-vertex bitangent, like Unity's built-in shaders. Writes a hidden attribute to the meshes", 1),
+            ("", "Per pixel", ""),
+            ("BLENDER", "Blender", "Bitangent rebuilt per pixel. Painter: Compute tangent space per fragment on", 0),
+            ("UNREAL", "Unreal Engine", "Bitangent rebuilt per pixel, like Blender", 2),
+            ("UNITY_HDRP", "Unity HDRP", "Bitangent rebuilt per pixel, like Blender", 3),
+            ("", "Per vertex", ""),
+            (
+                "UNITY",
+                "Unity (Built-in, URP)",
+                "Bitangent stored per vertex. Painter: Compute tangent space per fragment off. "
+                "LiveMat keeps a hidden attribute on the meshes up to date",
+                1,
+            ),
+            ("XNORMAL", "xNormal", "Bitangent stored per vertex, like Unity's built-in shaders", 4),
         ],
         default="BLENDER",
-        description="How normal maps are turned from tangent space into the surface normal",
+        description="Where the normal maps were baked for. It decides how the bitangent is built",
         update=actions.tangents_changed,
     )
 

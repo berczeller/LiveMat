@@ -9,12 +9,52 @@ with Blender's version, so LiveMat stores Unity's on the mesh as a hidden
 corner attribute that the node group reads back.
 """
 
+import array
+import zlib
+
 import bmesh
 import bpy
 
 from .nodegroup import BITANGENT_ATTRIBUTE
 
 _CORNER = "livemat_corner"  # temporary: each triangulated corner's original corner index
+
+# Tangent targets that build the bitangent per vertex. The rest rebuild it per pixel like Blender.
+PER_VERTEX = frozenset({"UNITY", "XNORMAL"})
+
+_signatures = {}  # mesh name -> geometry signature when its bitangents were written
+
+
+def per_vertex(material):
+    """True when `material` is a LiveMat material that needs per-vertex bitangents."""
+    state = getattr(material, "livemat", None) if material is not None else None
+    return bool(state is not None and material.get("livemat_preset") and state.tangents in PER_VERTEX)
+
+
+def signature(mesh):
+    """A checksum of everything the bitangents depend on: positions, corners, UVs and normals."""
+    uv = mesh.uv_layers.active_render or mesh.uv_layers.active
+    checksum = 0
+    for collection, prop, kind, width in (
+        (mesh.vertices, "co", "f", 3),
+        (mesh.loops, "vertex_index", "i", 1),
+        (uv.data if uv else (), "uv", "f", 2),
+        (mesh.corner_normals, "vector", "f", 3),
+    ):
+        values = array.array(kind, bytes(array.array(kind, [0]).itemsize * len(collection) * width))
+        if len(collection):
+            collection.foreach_get(prop, values)
+        checksum = zlib.crc32(values.tobytes(), checksum)
+    return (len(mesh.vertices), len(mesh.loops), uv.name if uv else None, checksum)
+
+
+def is_current(mesh):
+    """True when the stored bitangents were written for the mesh as it is now."""
+    return BITANGENT_ATTRIBUTE in mesh.attributes and _signatures.get(mesh.name) == signature(mesh)
+
+
+def forget():
+    _signatures.clear()
 
 
 def mesh_users(material):
@@ -91,6 +131,7 @@ def write_bitangents(mesh):
         attribute = mesh.attributes.new(BITANGENT_ATTRIBUTE, "FLOAT_VECTOR", "CORNER")
     attribute.data.foreach_set("vector", values)
     mesh.update()
+    _signatures[mesh.name] = signature(mesh)
     return True
 
 

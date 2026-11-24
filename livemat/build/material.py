@@ -13,7 +13,7 @@ from .. import stamps
 from ..core import naming
 from ..core.presets import DETAIL_SLOT_ID
 from ..core.scanner import TextureSet
-from . import nodegroup
+from . import nodegroup, tangents
 
 TAG = "livemat"  # custom property marking nodes LiveMat owns
 FRAME_LABEL = "Before LiveMat"
@@ -129,7 +129,7 @@ def build_material(material, texture_set, preset, *, rebuild=False, folder=None)
 
     _detail_uvs(tree, helpers, builder_nodes(tree).get(DETAIL_SLOT_ID))
     links.new(group_node.outputs[nodegroup.SHADER_OUTPUT], output.inputs["Surface"])
-    unity = getattr(getattr(material, "livemat", None), "tangents", "BLENDER") == "UNITY"
+    unity = getattr(getattr(material, "livemat", None), "tangents", "BLENDER") in tangents.PER_VERTEX
     socket = group_node.inputs.get(nodegroup.UNITY_TANGENTS)
     if socket is not None:
         socket.default_value = 1.0 if unity else 0.0

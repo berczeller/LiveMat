@@ -109,7 +109,7 @@ def build_item(props, item, *, create):
         material, item.texture_set(), preset, rebuild=props.rebuild, folder=props.scanned_folder
     )
     material["livemat_recursive"] = props.recursive
-    if material.livemat.tangents == "UNITY":
+    if tangents.per_vertex(material):
         tangents.update_users(material)
     return material
 
@@ -332,7 +332,7 @@ class LIVEMAT_OT_refresh(bpy.types.Operator):
                 continue
             updated += rebuilt
             missing += len(gone)
-            if material.livemat.tangents == "UNITY":
+            if tangents.per_vertex(material):
                 # Meshes may have been edited since their bitangents were written.
                 no_tangents.update(tangents.update_users(material))
         images = refresh.livemat_images(materials)
@@ -341,7 +341,7 @@ class LIVEMAT_OT_refresh(bpy.types.Operator):
         thumbs.forget(bpy.path.abspath(i.filepath) for i in images)
         refresh.redraw_all()
         for name in sorted(no_tangents):
-            self.report({"WARNING"}, f"{name} has no UV map, so Unity tangents can't be computed for it")
+            self.report({"WARNING"}, f"{name} has no UV map, so per-vertex tangents can't be computed for it")
         message = f"Reloaded {plural(reloaded, 'texture')}"
         if updated:
             message += f", updated {plural(updated, 'material')}"

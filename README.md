@@ -72,11 +72,17 @@ Blender never re-reads an image by itself, so after exporting from Painter again
 
 ### Normal maps and tangents
 
-Normal maps are stored relative to the surface's tangent and bitangent. Blender, Unreal and Unity HDRP rebuild the bitangent per pixel; Unity's built-in shaders build it per vertex. A map baked for Unity therefore shades slightly differently in Blender, most visibly on low-poly meshes and stretched UVs.
+Normal maps are stored relative to the surface's tangent and bitangent. Blender, Unreal and Unity HDRP rebuild the bitangent per pixel; Unity's built-in and URP shaders and xNormal build it per vertex. A map baked for one shades slightly differently in the other, most visibly on low-poly meshes and stretched UVs.
 
-Set **Normals** to **Unity** in the Material panel to match Unity. LiveMat then stores the per-vertex bitangent in a `.livemat_bitangent` attribute on the meshes using the material (FBX doesn't export it) and reads it back in the shader. Press **Refresh** after editing those meshes. N-gons are triangulated on a temporary copy for this, the way Unity triangulates on import, so the meshes themselves don't change.
+Pick what the maps were baked for under **Normals > Baked For** in the Material panel:
 
-In Substance 3D Painter, **Compute tangent space per fragment** decides which convention a bake uses: off matches Unity's built-in shaders, on matches Blender.
+| Per pixel | Per vertex |
+|---|---|
+| Blender, Unreal Engine, Unity HDRP | Unity (Built-in, URP), xNormal |
+
+For per-vertex targets LiveMat stores the bitangent in a `.livemat_bitangent` attribute on the meshes using the material (FBX doesn't export it) and reads it back in the shader. It keeps that attribute current by itself: objects that get the material, and meshes whose geometry, UVs or normals change, are updated as soon as they're back in Object Mode. N-gons are triangulated on a temporary copy for this, the way Unity triangulates on import, so the meshes themselves don't change.
+
+In Substance 3D Painter, **Compute tangent space per fragment** decides which convention a bake uses: off matches the per-vertex targets, on matches the per-pixel ones.
 
 ### Gloss curves
 

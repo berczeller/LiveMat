@@ -31,7 +31,7 @@ def rebuild(material, preset, texture_set=None):
     if texture_set is None:
         texture_set = builder.texture_set_from_material(material)
     builder.build_material(material, texture_set, preset, folder=builder.material_folder(material))
-    if getattr(material.livemat, "tangents", "BLENDER") == "UNITY":
+    if tangents.per_vertex(material):
         tangents.update_users(material)
 
 
@@ -62,7 +62,7 @@ def apply_tangents(material):
     Returns the names of meshes that couldn't get Unity tangents.
     """
     group_node = builder.livemat_group_node(material)
-    unity = material.livemat.tangents == "UNITY"
+    unity = material.livemat.tangents in tangents.PER_VERTEX
     if group_node is not None:
         from .build.nodegroup import UNITY_TANGENTS
 
@@ -166,4 +166,4 @@ def tangents_changed(state, _context):
     if material.get("livemat_preset"):
         failed = apply_tangents(material)
         for name in failed:
-            print(f"LiveMat: {name} has no UV map, so Unity tangents can't be computed for it")
+            print(f"LiveMat: {name} has no UV map, so per-vertex tangents can't be computed for it")
