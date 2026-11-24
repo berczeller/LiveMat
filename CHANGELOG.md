@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here. The format follows Keep a Changelog and the project uses Semantic Versioning.
 
-## [Unreleased]
+## [0.2.0] - 2026-11-24
 
 ### Changed
 - The tangent switch is now **Baked For**, with Blender, Unreal Engine and Unity HDRP (per-pixel bitangent) and Unity Built-in/URP and xNormal (per-vertex). Materials set to Unity keep that setting.
