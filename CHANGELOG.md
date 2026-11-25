@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows Keep
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-25
+
 ### Added
 - **Blend** tab: blend LiveMat materials on a mesh by an RGBA mask, as Rust's Vertex Blend and Packed Mask Blend shaders do. A Base is always on, R, G and B layer over it in that order, and A is ambient occlusion.
 - **Vertex Blend** and **Mask Blend** buttons switch between a vertex color mask and a packed mask texture.
