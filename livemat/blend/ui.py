@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 Tom Berczeller
 
-"""The Blend tab. Sections follow the work: pick a channel, manage its layers,
-fill or randomize selections, find edges by angle, keep selections, export."""
+"""The Blend tab: a Vertex Blend / Mask Blend switch, the Blend material, the
+mask of the current mode and its export. Secondary options live in popovers."""
 
 import bpy
 
@@ -10,7 +10,22 @@ from .. import icons
 from . import data, export
 from .ops import current_view
 
-CHANNEL_NAMES = {"R": "Red", "G": "Green", "B": "Blue", "A": "Alpha"}
+LAYER_CHANNELS = ("R", "G", "B")
+
+
+def _hint(layout, text, icon="INFO"):
+    row = layout.row()
+    row.enabled = False
+    row.label(text=text, icon=icon)
+
+
+def _chip(layout, channel):
+    layout.label(text="", icon_value=icons.get(f"channel_{channel.lower()}"))
+
+
+def _blend_material(obj):
+    material = obj.active_material
+    return material if material is not None and material.get("livemat_is_blend") else None
 
 
 class LIVEMAT_UL_blend_layers(bpy.types.UIList):
@@ -20,7 +35,7 @@ class LIVEMAT_UL_blend_layers(bpy.types.UIList):
         kind_icon = {"FILL": "SNAP_FACE", "PAINT": "BRUSH_DATA", "GENERATOR": "MOD_SMOOTH"}[item.kind]
         row.prop(item, "name", text="", emboss=False, icon=kind_icon)
         sub = row.row(align=True)
-        sub.ui_units_x = 4.6
+        sub.ui_units_x = 3.4
         sub.prop(item, "blend_mode", text="")
 
 
@@ -35,7 +50,126 @@ class LIVEMAT_UL_blend_sets(bpy.types.UIList):
         count.label(text=str(item.count))
 
 
-def draw_layer_settings(layout, context, mesh, layer):
+# Popovers
+
+
+class _Popover:
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "HEADER"  # only shown when a layout opens it
+    bl_ui_units_x = 11
+
+
+class LIVEMAT_PT_blend_height(_Popover, bpy.types.Panel):
+    bl_label = "Height Blend"
+
+    def draw(self, context):
+        setup = _blend_material(context.object).livemat_blend_material
+        layout = self.layout
+        layout.prop(setup, "use_height")
+        col = layout.column(align=True)
+        col.active = setup.use_height
+        for channel in LAYER_CHANNELS:
+            row = col.row(align=True)
+            _chip(row, channel)
+            row.prop(setup, f"factor_{channel.lower()}", slider=True)
+            row.prop(setup, f"falloff_{channel.lower()}", slider=True)
+
+
+class LIVEMAT_PT_blend_fill_options(_Popover, bpy.types.Panel):
+    bl_label = "Polygon Fill"
+
+    def draw(self, context):
+        tool = context.scene.livemat_blend_tool
+        col = self.layout.column()
+        col.row(align=True).prop(tool, "fill_mode", expand=True)
+        row = col.row(align=True)
+        row.prop(tool, "hit_test", expand=True)
+        col.prop(tool, "visible_only")
+
+
+class LIVEMAT_PT_blend_random_options(_Popover, bpy.types.Panel):
+    bl_label = "Randomize"
+
+    def draw(self, context):
+        tool = context.scene.livemat_blend_tool
+        col = self.layout.column()
+        col.row(align=True).prop(tool, "random_per", expand=True)
+        row = col.row(align=True)
+        row.prop(tool, "random_min", slider=True)
+        row.prop(tool, "random_max", slider=True)
+        row = col.row(align=True)
+        row.prop(tool, "use_seed", text="Seed", toggle=True, icon="LOCKED" if tool.use_seed else "UNLOCKED")
+        sub = row.row(align=True)
+        sub.enabled = tool.use_seed
+        sub.prop(tool, "seed", text="")
+        col.prop(tool, "smooth")
+
+
+class LIVEMAT_PT_blend_angle_options(_Popover, bpy.types.Panel):
+    bl_label = "Edge Angle"
+
+    def draw(self, context):
+        tool = context.scene.livemat_blend_tool
+        col = self.layout.column()
+        col.row(align=True).prop(tool, "angle_kind", expand=True)
+        row = col.row(align=True)
+        row.prop(tool, "angle_min")
+        row.prop(tool, "angle_max")
+        col.prop(tool, "angle_open")
+
+
+class LIVEMAT_PT_blend_export_options(_Popover, bpy.types.Panel):
+    bl_label = "Mask Texture"
+
+    def draw(self, context):
+        from .texture import IMPORT_NOTES
+
+        tool = context.scene.livemat_blend_tool
+        col = self.layout.column()
+        col.prop(tool, "export_preset", text="")
+        col.row(align=True).prop(tool, "export_format", expand=True)
+        col.prop(tool, "export_folder", text="")
+        _hint(col, IMPORT_NOTES[tool.export_preset])
+
+
+# Sections
+
+
+def _draw_switch(layout, mode):
+    row = layout.row(align=True)
+    row.scale_y = 1.4
+    row.operator("livemat.blend_mode", text="Vertex Blend", icon="VPAINT_HLT", depress=mode == "VERTEX").mode = "VERTEX"
+    row.operator("livemat.blend_mode", text="Mask Blend", icon="TPAINT_HLT", depress=mode == "TEXTURE").mode = "TEXTURE"
+    layout.separator(factor=0.6)
+
+
+def _draw_materials(layout, material, section, end_section):
+    body = section(layout, "Materials", "blend")
+    if material is None:
+        _hint(body, "Base, then R, G and B on top. A is AO")
+        row = body.row()
+        row.scale_y = 1.3
+        row.operator("livemat.blend_material_create", icon="NODE_MATERIAL")
+        end_section(body)
+        return
+    setup = material.livemat_blend_material
+    col = body.column(align=True)
+    row = col.row(align=True)
+    row.label(text="", icon="SNAP_FACE")
+    row.prop(setup, "base", text="")
+    for channel in LAYER_CHANNELS:
+        row = col.row(align=True)
+        _chip(row, channel)
+        row.prop(setup, f"layer_{channel.lower()}", text="")
+    col = body.column(align=True)
+    row = col.row(align=True)
+    row.popover("LIVEMAT_PT_blend_height", text="Height Blend" if setup.use_height else "Linear Blend", icon="MOD_DISPLACE")
+    row.operator("livemat.blend_material_rebuild", text="", icon="FILE_REFRESH")
+    col.prop(setup, "ao_strength", text="AO Strength", slider=True)
+    end_section(body)
+
+
+def _draw_layer_settings(layout, mesh, layer):
     """Settings of the active layer, depending on its kind."""
     col = layout.column(align=True)
     col.prop(layer, "opacity", slider=True)
@@ -46,9 +180,7 @@ def draw_layer_settings(layout, context, mesh, layer):
         if mesh.livemat_blend.painting == layer.uid:
             row.active_default = True
             row.operator("livemat.blend_paint_done", icon="CHECKMARK")
-            hint = layout.row()
-            hint.enabled = False
-            hint.label(text="Paint white to apply, black to remove", icon="INFO")
+            _hint(layout, "White adds, black removes")
         else:
             row.operator("livemat.blend_paint", icon="BRUSH_DATA")
     elif layer.kind == "GENERATOR":
@@ -74,42 +206,32 @@ def draw_layer_settings(layout, context, mesh, layer):
         row.operator("livemat.blend_bake", text="Rebake" if layer.baked else "Bake", icon="RENDER_STILL")
 
 
-def draw(layout, context, section, end_section):
-    """Draw the Blend tab with the shared section helpers from the main UI."""
-    obj = context.object
-    if obj is None or obj.type != "MESH":
-        layout.label(text="Select a mesh to paint its Blend mask", icon="INFO")
-        return
-    mesh = obj.data
+def _draw_vertex(layout, context, mesh, section, end_section):
     state = mesh.livemat_blend
     tool = context.scene.livemat_blend_tool
     editing = context.mode == "EDIT_MESH"
 
     if mesh.color_attributes.get(data.FINAL) is None:
-        body = section(layout, "Blend Mask", "blend")
-        body.label(text=f"{mesh.name} has no Blend mask yet")
+        body = section(layout, "Vertex Mask", "layers")
+        _hint(body, f"{mesh.name} has no vertex mask yet")
         row = body.row()
-        row.scale_y = 1.4
+        row.scale_y = 1.3
         row.active_default = True
         row.operator("livemat.blend_start", icon="ADD")
         end_section(body)
         return
 
-    # Channel, view and layers
-    body = section(layout, "Channel", "blend")
+    # Channel and its layers
+    body = section(layout, "Vertex Mask", "layers")
     row = body.row(align=True)
-    row.scale_y = 1.3
-    row.prop(state, "channel", expand=True, icon_only=True)
+    row.scale_y = 1.2
+    row.prop(state, "channel", expand=True)
+    row.separator()
     view = current_view(context, mesh)
-    row = body.row(align=True)
-    for mode, label, icon in (("MATERIAL", "Material", "MATERIAL"), ("COLORS", "Mask", "COLOR"), ("CHANNEL", "Channel", "IMAGE_ALPHA")):
-        row.operator("livemat.blend_view", text=label, icon=icon, depress=view == mode).mode = mode
+    for mode, icon, tip in (("MATERIAL", "MATERIAL", "Material"), ("COLORS", "COLOR", "Mask"), ("CHANNEL", "IMAGE_ALPHA", "Channel")):
+        row.operator("livemat.blend_view", text="", icon=icon, depress=view == mode).mode = mode
 
     channel = state.channel
-    index = data.CHANNELS.index(channel)
-    body.separator(factor=0.5)
-    header = body.row(align=True)
-    header.label(text=f"{CHANNEL_NAMES[channel]} Layers", icon_value=icons.get("layers"))
     row = body.row()
     row.template_list(
         "LIVEMAT_UL_blend_layers", channel, state, f"layers_{channel.lower()}", state, f"active_{channel.lower()}", rows=3
@@ -122,161 +244,142 @@ def draw(layout, context, section, end_section):
     side.operator("livemat.blend_layer_move", text="", icon="TRIA_DOWN").direction = "DOWN"
     layers = data.layers_of(state, channel)
     active = getattr(state, f"active_{channel.lower()}")
-    col = body.column(align=True)
     if 0 <= active < len(layers):
-        draw_layer_settings(body, context, mesh, layers[active])
-    col = body.column(align=True)
-    col.prop(state, "base", index=index, text="Base", slider=True)
+        _draw_layer_settings(body, mesh, layers[active])
+    body.prop(state, "base", index=data.CHANNELS.index(channel), text="Empty Value", slider=True)
     end_section(body)
 
-    # Fill
+    # Painting values onto polygons
     body = section(layout, "Fill", "fill")
     row = body.row(align=True)
     row.prop(tool, "value", slider=True)
     sub = row.row(align=True)
-    sub.ui_units_x = 2.6
+    sub.ui_units_x = 2.2
+    sub.alignment = "RIGHT"
     sub.label(text=f"{round(tool.value * 255)}")
     row = body.row(align=True)
     row.scale_y = 1.3
     row.operator("livemat.blend_polygon_fill", icon="RESTRICT_SELECT_OFF")
-    row = body.row(align=True)
-    row.prop(tool, "fill_mode", expand=True)
-    row = body.row(align=True)
-    row.prop(tool, "hit_test", expand=True)
-    row.prop(tool, "visible_only", toggle=True, icon="HIDE_OFF")
-    body.separator(factor=0.6)
-    if not editing:
-        hint = body.row()
-        hint.enabled = False
-        hint.label(text="Set and Randomize work on Edit Mode selections", icon="EDITMODE_HLT")
-    col = body.column()
-    col.enabled = editing
-
-    row = col.row(align=True)
-    row.scale_y = 1.2
-    row.operator("livemat.blend_fill", text="Set", icon="BRUSH_DATA").action = "SET"
-    row.operator("livemat.blend_fill", text="Erase", icon="X").action = "ERASE"
-    row.operator("livemat.blend_fill", text="Clear", icon="GHOST_DISABLED").action = "CLEAR"
-    col.separator(factor=0.6)
-    col.row(align=True).prop(tool, "random_per", expand=True)
-    row = col.row(align=True)
-    row.prop(tool, "random_min", slider=True)
-    row.prop(tool, "random_max", slider=True)
-    row = col.row(align=True)
-    row.prop(tool, "use_seed", toggle=True, icon="LOCKED" if tool.use_seed else "UNLOCKED")
-    sub = row.row(align=True)
-    sub.enabled = tool.use_seed
-    sub.prop(tool, "seed", text="")
-    row = col.row(align=True)
-    row.scale_y = 1.2
-    row.operator("livemat.blend_fill", text="Randomize", icon="RNDCURVE").action = "RANDOMIZE"
-    col.prop(tool, "smooth")
-    end_section(body)
-
-    # Edge angle
-    body = section(layout, "Edge Angle", "angle")
-    col = body.column()
-    col.enabled = editing
-    col.row(align=True).prop(tool, "angle_kind", expand=True)
-    row = col.row(align=True)
-    row.prop(tool, "angle_min")
-    row.prop(tool, "angle_max")
-    col.prop(tool, "angle_open")
-    row = col.row(align=True)
-    for target, label, icon in (("EDGE", "Edges", "EDGESEL"), ("VERT", "Verts", "VERTEXSEL"), ("FACE", "Faces", "FACESEL")):
-        row.operator("livemat.blend_select_angle", text=label, icon=icon).target = target
-    end_section(body)
-
-    # Saved selections
-    body = section(layout, "Selections", "selection")
-    row = body.row()
-    row.template_list("LIVEMAT_UL_blend_sets", "", state, "sets", state, "active_set", rows=3)
-    side = row.column(align=True)
-    add = side.row(align=True)
-    add.enabled = editing
-    add.operator("livemat.blend_set_add", text="", icon="ADD")
-    side.operator("livemat.blend_set_remove", text="", icon="REMOVE")
-    if len(state.sets):
+    row.popover("LIVEMAT_PT_blend_fill_options", text="", icon="PREFERENCES")
+    if editing:
         row = body.row(align=True)
-        row.enabled = editing
-        row.prop(tool, "combine", text="")
-        row.operator("livemat.blend_set_combine", text="Combine Ticked", icon="SELECT_EXTEND")
-        if editing:
-            hint = body.row()
-            hint.enabled = False
-            hint.label(text="Click a selection to select it again", icon="INFO")
-    end_section(body)
-
-    # Blend material
-    body = section(layout, "Blend Material", "blend")
-    material = obj.active_material
-    if material is not None and material.get("livemat_is_blend"):
-        setup = material.livemat_blend_material
-        col = body.column(align=True)
-        col.prop(setup, "base", text="Base")
-        for channel in data.CHANNELS:
-            row = col.row(align=True)
-            row.label(text="", icon_value=icons.get(f"channel_{channel.lower()}"))
-            row.prop(setup, f"layer_{channel.lower()}", text="")
-        col = body.column(align=True)
-        col.prop(setup, "use_height")
-        sub = col.column(align=True)
-        sub.active = setup.use_height
-        sub.prop(setup, "height_influence", slider=True)
-        sub.prop(setup, "transition", slider=True)
-        body.separator(factor=0.5)
-        body.row(align=True).prop(setup, "mask_source", expand=True)
-        if setup.mask_source == "TEXTURE":
-            body.prop(setup, "resolution")
-            row = body.row(align=True)
-            for channel in data.CHANNELS:
-                row.operator(
-                    "livemat.blend_mask_paint", text="", icon_value=icons.get(f"channel_{channel.lower()}")
-                ).channel = channel
-            if context.mode == "PAINT_TEXTURE":
-                done = body.row()
-                done.active_default = True
-                done.operator("livemat.blend_mask_done", icon="CHECKMARK")
-            body.operator("livemat.blend_mask_convert", text="Textures to Vertex Colors", icon="VPAINT_HLT").direction = "TO_VERTEX"
-        else:
-            body.operator("livemat.blend_mask_convert", text="Vertex Colors to Textures", icon="TPAINT_HLT").direction = "TO_TEXTURE"
-        body.operator("livemat.blend_material_rebuild", icon="FILE_REFRESH")
+        row.operator("livemat.blend_fill", text="Set", icon="CHECKMARK").action = "SET"
+        row.operator("livemat.blend_fill", text="Erase", icon="X").action = "ERASE"
+        row.operator("livemat.blend_fill", text="Clear", icon="TRASH").action = "CLEAR"
+        row = body.row(align=True)
+        row.operator("livemat.blend_fill", text="Randomize", icon="RNDCURVE").action = "RANDOMIZE"
+        row.popover("LIVEMAT_PT_blend_random_options", text="", icon="PREFERENCES")
     else:
-        hint = body.row()
-        hint.enabled = False
-        hint.label(text="Preview LiveMat materials blended by this mask", icon="INFO")
-        body.operator("livemat.blend_material_create", icon="NODE_MATERIAL")
+        _hint(body, "More tools in Edit Mode", "EDITMODE_HLT")
     end_section(body)
 
-    # Export
+    if editing:
+        body = section(layout, "Selections", "selection")
+        row = body.row(align=True)
+        for target, icon in (("EDGE", "EDGESEL"), ("VERT", "VERTEXSEL"), ("FACE", "FACESEL")):
+            row.operator("livemat.blend_select_angle", text="", icon=icon).target = target
+        row.label(text="By Edge Angle")
+        row.popover("LIVEMAT_PT_blend_angle_options", text="", icon="PREFERENCES")
+        row = body.row()
+        row.template_list("LIVEMAT_UL_blend_sets", "", state, "sets", state, "active_set", rows=3)
+        side = row.column(align=True)
+        side.operator("livemat.blend_set_add", text="", icon="ADD")
+        side.operator("livemat.blend_set_remove", text="", icon="REMOVE")
+        if len(state.sets):
+            row = body.row(align=True)
+            row.prop(tool, "combine", text="")
+            row.operator("livemat.blend_set_combine", text="Combine Ticked", icon="SELECT_EXTEND")
+        end_section(body)
+
+
+def _draw_mask(layout, context, obj, material, section, end_section):
+    body = section(layout, "Packed Mask", "layers")
+    if material is None:
+        _hint(body, "Create a Blend material to paint its mask")
+        end_section(body)
+        return
+    setup = material.livemat_blend_material
+    col = body.column()
+    col.use_property_split = True
+    col.use_property_decorate = False
+    row = col.row(align=True)
+    row.prop(setup, "mask_image", text="Mask")
+    row.operator("livemat.blend_mask_new", text="", icon="ADD")
+    col.prop(setup, "macro_normal", text="Normal")
+    col.prop_search(setup, "uv_map", obj.data, "uv_layers", text="UV Map")
+    col.prop(setup, "resolution", text="Size")
+
+    body.separator(factor=0.5)
+    row = body.row(align=True)
+    row.scale_y = 1.3
+    for channel in data.CHANNELS:
+        row.operator(
+            "livemat.blend_mask_paint",
+            text="AO" if channel == "A" else channel,
+            icon_value=icons.get(f"channel_{channel.lower()}"),
+            depress=setup.painting == channel,
+        ).channel = channel
+    if setup.painting:
+        row = body.row()
+        row.scale_y = 1.3
+        row.active_default = True
+        row.operator("livemat.blend_mask_done", icon="CHECKMARK")
+        _hint(body, "White adds, black removes")
+    else:
+        row = body.row()
+        row.enabled = obj.data.color_attributes.get(data.FINAL) is not None
+        row.operator("livemat.blend_mask_from_vertex", icon="VPAINT_HLT")
+    end_section(body)
+
+
+def _draw_export(layout, mesh, material, mode, tool, section, end_section):
     body = section(layout, "Export", "export")
-    problems = export.issues(mesh)
-    if problems:
+    if mode == "VERTEX":
+        problems = export.issues(mesh)
         for problem in problems:
             row = body.row()
             row.alert = True
             row.label(text=problem, icon="ERROR")
-        body.operator("livemat.blend_move_first", icon="SORT_DESC")
-    else:
-        row = body.row()
-        row.enabled = False
-        row.label(text="Exported as vertex color set 1", icon="CHECKMARK")
-    body.operator("livemat.blend_check", icon="EXPORT")
-    if material is not None and material.get("livemat_is_blend"):
-        body.separator(factor=0.6)
-        body.label(text="Mask Textures")
-        col = body.column(align=True)
-        col.prop(tool, "export_preset", text="")
-        row = col.row(align=True)
-        row.prop(tool, "export_format", expand=True)
-        col.prop(tool, "export_folder", text="")
-        body.operator("livemat.blend_mask_export", icon="IMAGE_DATA")
-        from .texture import IMPORT_NOTES
-
-        note = body.row()
-        note.enabled = False
-        note.label(text=IMPORT_NOTES[tool.export_preset], icon="INFO")
+        if problems:
+            body.operator("livemat.blend_move_first", icon="SORT_DESC")
+        row = body.row(align=True)
+        row.operator("livemat.blend_check", icon="EXPORT")
+        if not problems and mesh.color_attributes.get(data.FINAL) is not None:
+            row.label(text="", icon="CHECKMARK")
+    if material is not None:
+        row = body.row(align=True)
+        row.operator("livemat.blend_mask_export", text="Export Mask Texture", icon="IMAGE_DATA")
+        row.popover("LIVEMAT_PT_blend_export_options", text="", icon="PREFERENCES")
     end_section(body)
 
 
-register, unregister = bpy.utils.register_classes_factory((LIVEMAT_UL_blend_layers, LIVEMAT_UL_blend_sets))
+def draw(layout, context, section, end_section):
+    """Draw the Blend tab with the shared section helpers from the main UI."""
+    obj = context.object
+    if obj is None or obj.type != "MESH":
+        _hint(layout, "Select a mesh to blend materials on it")
+        return
+    tool = context.scene.livemat_blend_tool
+    material = _blend_material(obj)
+    mode = material.livemat_blend_material.mask_source if material is not None else tool.mode
+
+    _draw_switch(layout, mode)
+    _draw_materials(layout, material, section, end_section)
+    if mode == "VERTEX":
+        _draw_vertex(layout, context, obj.data, section, end_section)
+    else:
+        _draw_mask(layout, context, obj, material, section, end_section)
+    _draw_export(layout, obj.data, material, mode, tool, section, end_section)
+
+
+register, unregister = bpy.utils.register_classes_factory(
+    (
+        LIVEMAT_UL_blend_layers,
+        LIVEMAT_UL_blend_sets,
+        LIVEMAT_PT_blend_height,
+        LIVEMAT_PT_blend_fill_options,
+        LIVEMAT_PT_blend_random_options,
+        LIVEMAT_PT_blend_angle_options,
+        LIVEMAT_PT_blend_export_options,
+    )
+)

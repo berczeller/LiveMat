@@ -559,6 +559,7 @@ class BlendMaterialTest(BlendTestBase):
         self.obj.select_set(True)
         self.obj.data.materials.clear()
         self.obj.data.materials.append(self.brick)
+        self.tool.mode = "VERTEX"  # a test may leave the switch on Mask Blend
 
     def tearDown(self):
         super().tearDown()
@@ -628,7 +629,7 @@ class BlendMaterialTest(BlendTestBase):
 
 
 class PixelMaskTest(BlendMaterialTest):
-    """Texture masks: render comparisons, conversions both ways, and export layouts."""
+    """Mask Blend: the packed RGBA mask (A is AO), painting, baking from vertex colors and export layouts."""
 
     def make_blend(self):
         bpy.ops.livemat.blend_material_create()
@@ -639,80 +640,138 @@ class PixelMaskTest(BlendMaterialTest):
         setup.resolution = "512"
         return blend
 
-    def fill_image(self, blend, channel, value):
-        from livemat.blend import texture
+    def fill_mask(self, blend, rgba):
+        from livemat.blend import material, texture
 
-        image = texture.channel_image(blend, channel, create=True)
-        texture.write_gray(image, np.full((image.size[1], image.size[0]), value, dtype=np.float32))
+        image = texture.packed_image(blend, create=True)
+        width, height = image.size
+        texture.write_rgba(image, np.broadcast_to(np.array(rgba, dtype=np.float32), (height, width, 4)))
         blend.livemat_blend_material.mask_source = "TEXTURE"
-        from livemat.blend import material
-
         material.build(blend)
 
-    def test_texture_mask_drives_the_blend(self):
+    def mask_at_face(self, blend, face=0):
+        """The packed mask's RGBA at the UV center of a face."""
+        from livemat.blend import texture
+
+        uvs = np.zeros(len(self.mesh.loops) * 2, dtype=np.float32)
+        self.mesh.uv_layers.active.data.foreach_get("uv", uvs)
+        uvs = uvs.reshape(-1, 2)
+        polygon = self.mesh.polygons[face]
+        u, v = uvs[polygon.loop_start:polygon.loop_start + polygon.loop_total].mean(axis=0)
+        rgba = texture.read_rgba(blend.livemat_blend_material.mask_image)
+        height, width = rgba.shape[:2]
+        return rgba[int(v * height), int(u * width)]
+
+    def sources(self):
         brick = self.render()
         self.obj.active_material = self.moss
         moss = self.render()
         self.obj.active_material = self.brick
+        return brick, moss
+
+    def test_packed_mask_drives_the_blend(self):
+        brick, moss = self.sources()
         blend = self.make_blend()
-        self.fill_image(blend, "R", 0.0)
+        self.fill_mask(blend, (0.0, 0.0, 0.0, 1.0))
         self.assertPixel(self.render(), brick, 0.02)
-        self.fill_image(blend, "R", 1.0)
+        self.fill_mask(blend, (1.0, 0.0, 0.0, 1.0))
         self.assertPixel(self.render(), moss, 0.02)
 
-    def test_vertex_to_texture(self):
-        from livemat.blend import texture
+    def test_blue_is_on_top(self):
+        brick, _moss = self.sources()
+        blend = self.make_blend()
+        blend.livemat_blend_material.layer_b = self.brick
+        self.fill_mask(blend, (1.0, 0.0, 1.0, 1.0))
+        self.assertPixel(self.render(), brick, 0.02)
 
+    def test_alpha_is_ambient_occlusion(self):
+        brick, _moss = self.sources()
+        blend = self.make_blend()
+        self.fill_mask(blend, (0.0, 0.0, 0.0, 0.0))
+        self.assertTrue(all(c < 0.02 for c in self.render()))  # fully occluded: black
+        blend.livemat_blend_material.ao_strength = 0.0
+        self.assertPixel(self.render(), brick, 0.02)
+
+    def test_vertex_alpha_is_ambient_occlusion_too(self):
+        brick, _moss = self.sources()
+        self.make_blend()
+        self.assertPixel(self.render(), brick, 0.02)  # a new vertex mask is unoccluded
+        self.mesh.livemat_blend.channel = "A"
+        self.set_mask_r(0.0)
+        self.assertTrue(all(c < 0.02 for c in self.render()))
+
+    def test_new_mask_is_empty_with_full_ao(self):
+        blend = self.make_blend()
+        self.assertEqual(bpy.ops.livemat.blend_mask_new(), {"FINISHED"})
+        image = blend.livemat_blend_material.mask_image
+        self.assertEqual(tuple(image.size), (512, 512))
+        self.assertEqual(image.colorspace_settings.name, "Non-Color")
+        self.assertEqual(tuple(float(c) for c in self.mask_at_face(blend)), (0.0, 0.0, 0.0, 1.0))
+
+    def test_bake_from_vertex(self):
         blend = self.make_blend()
         self.set_mask_r(1.0)
-        bpy.ops.livemat.blend_mask_convert(direction="TO_TEXTURE")
+        self.assertEqual(bpy.ops.livemat.blend_mask_from_vertex(), {"FINISHED"})
         self.assertEqual(blend.livemat_blend_material.mask_source, "TEXTURE")
-        uvs = np.zeros(len(self.mesh.loops) * 2, dtype=np.float32)
-        self.mesh.uv_layers.active.data.foreach_get("uv", uvs)
-        uvs = uvs.reshape(-1, 2)
-        polygon = self.mesh.polygons[0]
-        center = uvs[polygon.loop_start:polygon.loop_start + polygon.loop_total].mean(axis=0, keepdims=True)
-        red = texture.read_gray(blend.livemat_blend_material.image_r)
-        green = texture.read_gray(blend.livemat_blend_material.image_g)
-        self.assertAlmostEqual(float(texture.sample(red, center)[0]), 1.0, places=2)
-        self.assertAlmostEqual(float(texture.sample(green, center)[0]), 0.0, places=2)
+        self.assertEqual(bpy.context.scene.livemat_blend_tool.mode, "TEXTURE")
+        r, g, _b, a = (float(c) for c in self.mask_at_face(blend))
+        self.assertAlmostEqual(r, 1.0, places=2)
+        self.assertAlmostEqual(g, 0.0, places=2)
+        self.assertAlmostEqual(a, 1.0, places=2)
 
-    def test_texture_to_vertex(self):
+    def test_paint_a_channel(self):
+        from livemat.blend import material, texture
+
         blend = self.make_blend()
-        self.fill_image(blend, "R", 0.5)
-        bpy.ops.livemat.blend_mask_convert(direction="TO_VERTEX")
+        self.fill_mask(blend, (0.25, 0.0, 0.0, 1.0))
+        texture.paint_start(bpy.context, blend, "G")
+        setup = blend.livemat_blend_material
+        self.assertEqual(setup.painting, "G")
+        paint = bpy.data.images[material.PAINT_IMAGE]
+        paint.pixels.foreach_set(np.ones(len(paint.pixels), dtype=np.float32))
+        self.assertEqual(bpy.ops.livemat.blend_mask_done(), {"FINISHED"})
+        self.assertEqual(setup.painting, "")
+        self.assertIsNone(bpy.data.images.get(material.PAINT_IMAGE))
+        r, g, _b, a = (float(c) for c in self.mask_at_face(blend))
+        self.assertAlmostEqual(r, 0.25, places=2)
+        self.assertAlmostEqual(g, 1.0, places=2)
+        self.assertAlmostEqual(a, 1.0, places=2)
+
+    def test_mode_switch(self):
+        tool = bpy.context.scene.livemat_blend_tool
+        self.assertEqual(bpy.ops.livemat.blend_mode(mode="TEXTURE"), {"FINISHED"})
+        self.assertEqual(tool.mode, "TEXTURE")
+        blend = self.make_blend()  # new materials follow the switch
+        self.assertEqual(blend.livemat_blend_material.mask_source, "TEXTURE")
+        self.assertEqual(bpy.ops.livemat.blend_mode(mode="VERTEX"), {"FINISHED"})
         self.assertEqual(blend.livemat_blend_material.mask_source, "VERTEX")
-        values = final_values(self.mesh)
-        self.assertTrue(np.all(np.abs(values - 128) <= 1), values[:8])
-        self.assertEqual(self.mesh.livemat_blend.layers_r[0].name, "From Texture")
+        self.assertEqual(tool.mode, "VERTEX")
 
     def test_export_layouts(self):
         import os
 
         from livemat.blend import texture
 
-        blend = self.make_blend()
-        self.fill_image(blend, "R", 1.0)
-        self.fill_image(blend, "G", 1.0)
+        rgba = np.zeros((4, 4, 4), dtype=np.float32)
+        rgba[...] = (1.0, 1.0, 0.0, 0.5)
         folder = os.path.join(self._tmp.name, "out")
 
-        paths = texture.export(blend, folder, "mask", "GENERIC", "PNG")
+        def first_pixel(path):
+            image = bpy.data.images.load(path)
+            image.colorspace_settings.name = "Non-Color"
+            pixel = tuple(round(v, 2) for v in image.pixels[:4])
+            bpy.data.images.remove(image)
+            return pixel
+
+        paths = texture.export(rgba, folder, "mask", "RUST", "PNG")
         self.assertEqual([os.path.basename(p) for p in paths], ["mask_mask.png"])
-        image = bpy.data.images.load(paths[0])
-        image.colorspace_settings.name = "Non-Color"
-        pixel = tuple(round(v, 2) for v in image.pixels[:4])
-        bpy.data.images.remove(image)
-        self.assertEqual(pixel, (1.0, 1.0, 0.0, 0.0))
-
-        paths = texture.export(blend, folder, "terrain", "UNITY_TERRAIN", "TARGA")
-        image = bpy.data.images.load(paths[0])
-        image.colorspace_settings.name = "Non-Color"
-        pixel = tuple(round(v, 2) for v in image.pixels[:4])
-        bpy.data.images.remove(image)
-        self.assertEqual(pixel, (0.0, 1.0, 0.0, 0.0))  # G fully covers the bottom layer R, as in the preview
-
-        paths = texture.export(blend, folder, "land", "UNREAL_LANDSCAPE", "PNG")
-        self.assertEqual(sorted(os.path.basename(p) for p in paths), ["land_A.png", "land_B.png", "land_G.png", "land_R.png"])
+        self.assertEqual(first_pixel(paths[0]), (1.0, 1.0, 0.0, 0.5))
+        paths = texture.export(rgba, folder, "hdrp", "UNITY_HDRP", "PNG")
+        self.assertEqual(first_pixel(paths[0]), (1.0, 1.0, 0.0, 1.0))
+        paths = texture.export(rgba, folder, "terrain", "UNITY_TERRAIN", "TARGA")
+        self.assertEqual(first_pixel(paths[0]), (0.0, 0.0, 1.0, 0.0))  # G covers R; Base is the first weight
+        paths = texture.export(rgba, folder, "land", "UNREAL_LANDSCAPE", "PNG")
+        self.assertEqual(sorted(os.path.basename(p) for p in paths), ["land_B.png", "land_Base.png", "land_G.png", "land_R.png"])
 
 
 class BlendReviewRegressionTest(PixelMaskTest):
@@ -727,44 +786,42 @@ class BlendReviewRegressionTest(PixelMaskTest):
         material.rebuild_all()
         self.assertEqual(len(first.node_tree.links), links)
 
-    def test_height_blend_keeps_the_ends_at_full_influence(self):
-        brick = self.render()
-        self.obj.active_material = self.moss
-        moss = self.render()
-        self.obj.active_material = self.brick
+    def test_height_blend_keeps_the_ends_at_full_factor(self):
+        brick, moss = self.sources()
         blend = self.make_blend()
         setup = blend.livemat_blend_material
         setup.use_height = True
-        setup.height_influence = 1.0
-        setup.transition = 0.2
-        self.set_mask_r(0.0)  # Moss is as high as a height map gets, and still mustn't show
+        setup.factor_r = 1.0
+        setup.falloff_r = 0.2
+        self.set_mask_r(0.0)  # Moss is as high as a height map gets, and still must not show
         self.assertPixel(self.render(), brick, 0.02)
         self.set_mask_r(1.0)
         self.assertPixel(self.render(), moss, 0.02)
 
-    def test_resolution_change_before_converting(self):
+    def test_resolution_change_before_baking(self):
         from livemat.blend import texture
 
         blend = self.make_blend()
-        texture.channel_image(blend, "R", create=True)  # made at 512
+        texture.packed_image(blend, create=True)  # made at 512
         blend.livemat_blend_material.resolution = "1024"
         self.set_mask_r(1.0)
-        self.assertEqual(bpy.ops.livemat.blend_mask_convert(direction="TO_TEXTURE"), {"FINISHED"})
-        self.assertEqual(tuple(blend.livemat_blend_material.image_r.size), (1024, 1024))
+        self.assertEqual(bpy.ops.livemat.blend_mask_from_vertex(), {"FINISHED"})
+        self.assertEqual(tuple(blend.livemat_blend_material.mask_image.size), (1024, 1024))
 
-    def test_export_from_vertex_leaves_painted_images_alone(self):
+    def test_export_from_vertex_leaves_the_packed_mask_alone(self):
         import os
 
         from livemat.blend import texture
 
         blend = self.make_blend()
-        self.fill_image(blend, "R", 0.25)  # painted earlier
+        self.fill_mask(blend, (0.25, 0.0, 0.0, 1.0))  # painted earlier
         blend.livemat_blend_material.mask_source = "VERTEX"
         self.set_mask_r(1.0)
         tool = bpy.context.scene.livemat_blend_tool
         tool.export_folder = os.path.join(self._tmp.name, "out")
         self.assertEqual(bpy.ops.livemat.blend_mask_export(), {"FINISHED"})
-        self.assertAlmostEqual(float(texture.read_gray(blend.livemat_blend_material.image_r).mean()), 0.25, places=2)
+        mask = texture.read_rgba(blend.livemat_blend_material.mask_image)
+        self.assertAlmostEqual(float(mask[..., 0].mean()), 0.25, places=2)
 
     def test_bakes_ignore_selected_to_active(self):
         bpy.context.scene.render.bake.use_selected_to_active = True
@@ -774,7 +831,7 @@ class BlendReviewRegressionTest(PixelMaskTest):
             bpy.ops.livemat.blend_layer_add(kind="GENERATOR", generator="AO")
             self.mesh.livemat_blend.layers_r[0].samples = 2
             self.assertEqual(bpy.ops.livemat.blend_bake(), {"FINISHED"})
-            blend = self.make_blend()
-            self.assertEqual(bpy.ops.livemat.blend_mask_convert(direction="TO_TEXTURE"), {"FINISHED"})
+            self.make_blend()
+            self.assertEqual(bpy.ops.livemat.blend_mask_from_vertex(), {"FINISHED"})
         finally:
             bpy.context.scene.render.bake.use_selected_to_active = False

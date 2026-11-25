@@ -5,17 +5,16 @@ All notable changes to this project are documented here. The format follows Keep
 ## [Unreleased]
 
 ### Added
-- **Blend** tab: RGBA blend masks on meshes, exported as vertex colors. Each channel has a stack of layers with opacity and blend modes.
-- Edit Mode tools to set, erase, clear or randomize a channel on the selection, per vertex, polygon, element or edge.
-- Select by edge angle: convex, concave or both, within an angle range.
-- Saved selections that can be selected again and combined.
-- Export checks that make sure engines read the mask as the first vertex color set, with a one-click fix and an FBX round-trip test.
-- Three layer kinds: Fill, Paint (painted with Blender's vertex paint brushes, with live preview) and Generator.
+- **Blend** tab: blend LiveMat materials on a mesh by an RGBA mask, as Rust's Vertex Blend and Packed Mask Blend shaders do. A Base is always on, R, G and B layer over it in that order, and A is ambient occlusion.
+- **Vertex Blend** and **Mask Blend** buttons switch between a vertex color mask and a packed mask texture.
+- Blend materials: a Base and one LiveMat material each for R, G and B, mixed property by property (color, metallic, roughness, normal, height, alpha, emission), with a height blend whose factor and falloff are set per layer, and an AO strength. Previewed live.
+- Vertex Blend: each channel has a stack of layers with opacity and blend modes. Three layer kinds: Fill, Paint (painted with Blender's vertex paint brushes, with live preview) and Generator.
 - Polygon Fill tool: click a polygon or drag a rectangle in the viewport to fill it, by polygon, connected mesh or UV island, with intersection or center hit-testing and visible polygons only. A highlight shows what will be filled.
-- Blend materials: a base LiveMat material with one more per mask channel, mixed property by property (color, metallic, roughness, normal, height, alpha, emission) with a generic height blend, previewed live.
-- Pixel masks: a Blend material can read its mask from one painted texture per channel instead of vertex colors. Convert between vertex colors and textures in both directions.
-- Export mask textures in the layouts of Unity HDRP LayeredLit, Unity Terrain splatmaps, Unreal (packed or landscape layers), Godot or plain RGBA, as 8-bit PNG or TGA.
+- Edit Mode tools to set, erase, clear or randomize a channel on the selection, per vertex, polygon, element or edge, select by edge angle (convex, concave or both), and saved selections that can be selected again and combined.
 - Generators baked from the mesh: Ambient Occlusion, Thickness and Curvature with Cycles, and Edge Wear from face angles. Low, High and Invert remap them live without baking again.
+- Mask Blend: one packed RGBA mask and an optional macro normal on a chosen UV map. Paint a channel with Blender's texture paint brushes, or bake it from the vertex mask.
+- Export checks that make sure engines read the vertex mask as the first color set, with a one-click fix and an FBX round-trip test.
+- Export mask textures in the layouts of Rust's Packed Mask, Unity HDRP LayeredLit, Unity Terrain splatmaps, Unreal (packed or landscape layers) or Godot, as 8-bit PNG or TGA.
 
 ### Changed
 - The sidebar panel has side tabs for Build, Blend and Templates. The Material inspector moved into the Build tab.

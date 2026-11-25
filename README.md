@@ -19,7 +19,7 @@ Texture sets come out of Substance 3D Painter, Designer and game pipelines in ma
 - **Refresh** reloads every texture from disk and picks up maps you exported later. **Auto Reload** does it for you while you paint.
 - **Match Authoring View** switches to a neutral view transform for side-by-side checks with Painter, and back.
 - Existing node setups are kept aside in a frame, never deleted, unless you ask for a clean rebuild.
-- **Blend**: paint RGBA blend masks on meshes, one channel at a time, in layers, like masks in Painter. Fill selections or click polygons, paint with Blender's brushes, bake AO, thickness, curvature or edge wear, and preview LiveMat materials blended by the mask. Export it as vertex colors or as mask textures for Unity, Unreal or Godot.
+- **Blend**: mix LiveMat materials on a mesh by an RGBA mask, like Rust's Vertex Blend and Packed Mask Blend shaders. Paint the mask as vertex colors in layers (fills, polygon fill, brushes, baked AO, thickness, curvature or edge wear) or as one packed texture with Blender's brushes, preview the result live, and export it for Rust, Unity, Unreal or Godot.
 
 ## Presets
 
@@ -52,7 +52,7 @@ GitHub's automatic "Source code" archives are not installable add-ons. Use the `
 
 ## Usage
 
-Open the sidebar in the 3D Viewport or the Shader Editor (`N`) and go to the **LiveMat** tab. The icons on its left switch between **Build** (materials from texture folders), **Blend** (vertex color masks) and **Templates** (your own presets, coming in a later version).
+Open the sidebar in the 3D Viewport or the Shader Editor (`N`) and go to the **LiveMat** tab. The icons on its left switch between **Build** (materials from texture folders), **Blend** (materials mixed by a mask) and **Templates** (your own presets, coming in a later version).
 
 ### Build
 
@@ -75,7 +75,16 @@ Blender never re-reads an image by itself, so after exporting from Painter again
 
 ### Blend
 
-Blend paints an RGBA mask on a mesh, the kind shaders use to blend materials or add edge wear and dirt. Each channel is edited on its own and holds a stack of layers, like masks in Painter: a layer can be hidden, faded with **Opacity** or blended with **Add**, **Subtract**, **Multiply**, **Lighten** or **Darken**. LiveMat blends the layers into one color attribute, **LiveMat Blend**, which is what gets exported.
+Blend mixes LiveMat materials on a mesh by an RGBA mask, the way Rust's Vertex Blend and Packed Mask Blend shaders do: a **Base** that's always on, then the **R**, **G** and **B** layers in that order, so B ends up on top. The alpha channel is ambient occlusion. The two buttons at the top of the **Blend** tab pick where the mask lives:
+
+- **Vertex Blend**: the mask is the mesh's vertex colors, exported with the FBX.
+- **Mask Blend**: the mask is one packed RGBA texture on the UVs, next to an optional macro normal map.
+
+**Materials.** **Create Blend Material** replaces the active material with one that blends LiveMat materials: pick the **Base** and one material for each of R, G and B. They're mixed property by property (color, metallic, roughness, normal, height, alpha, emission) under one Principled BSDF, as engine shaders do. **AO Strength** sets how much the alpha channel darkens the result. With **Height Blend** on (its popover), a layer comes in where its mask is high and its height map shapes the edge: **Factor** is how much the height pulls the edge and **Falloff** how soft it is, per layer, like the blend factor and falloff of the engine shader. A layer with mask m and height h gets the weight `clamp(((m - 0.5) * (f + s) + (h - 0.5) * f + s / 2) / s, 0, 1)`, with f the Factor and s the Falloff. Off, the weight is simply m. The refresh button rebuilds Blend materials after their sources change.
+
+#### Vertex Blend
+
+Each channel is edited on its own and holds a stack of layers, like masks in Painter: a layer can be hidden, faded with **Opacity** or blended with **Add**, **Subtract**, **Multiply**, **Lighten** or **Darken**. LiveMat blends the layers into one color attribute, **LiveMat Blend**, which is what gets exported.
 
 The **+** next to the layer list adds one of three kinds:
 
@@ -85,34 +94,41 @@ The **+** next to the layer list adds one of three kinds:
 | Paint | Brush strokes: press **Paint**, paint with Blender's vertex paint brushes (white applies the layer's **Value**, black removes it), press **Done**. The material preview follows each stroke. |
 | Generator | Ambient Occlusion, Thickness or Curvature baked with Cycles, or Edge Wear from the angles between faces. **Low**, **High** and **Invert** reshape the bake live; **Rebake** after changing the mesh. |
 
-1. Select a mesh and press **Add Blend Mask** in the **Blend** tab.
-2. Pick a channel with the **R**, **G**, **B**, **A** chips. **Mask** shows the RGBA result in the viewport, **Channel** shows the active channel in grayscale, **Material** goes back to your shading.
-3. In Edit Mode, select vertices, edges or faces and use **Fill**:
+1. Select a mesh and press **Add Blend Mask**.
+2. Pick a channel with the **R**, **G**, **B**, **AO** chips. The three buttons next to them show your material, the RGBA mask, or the active channel in grayscale. **Empty Value** is what the channel holds where no layer covers it (1 for AO).
+3. **Polygon Fill** works like Painter's tool: click a polygon or drag a rectangle to fill it with the **Value**. Its options (the gear) fill by **Polygon**, connected **Mesh** or **UV Island**, and pick polygons a rectangle touches (**Intersect**) or whose center is inside (**Center**), visible ones only unless you turn that off. Ctrl clears, Esc or right-click finishes, each fill is one undo step.
+4. In Edit Mode the tab adds tools for the selection:
    - **Set** writes the value, **Erase** writes 0, **Clear** makes the layer transparent there so the layers below show.
-   - **Randomize** writes random values between **Min** and **Max**, one per vertex, polygon, connected element or selected edge. **Fixed Seed** repeats the same values.
-   - **Smooth Polygons** on lets face selections fade into their neighbors; off gives a hard border.
-4. **Edge Angle** selects convex edges (ridges), concave edges (valleys) or both within an angle range, inside the selection or across the whole mesh, as edges, their vertices or the faces on both sides. Fill them for edge wear or corner dirt.
-5. **Polygon Fill** (Object Mode, in the Fill section) works like Painter's tool: click a polygon or drag a rectangle to fill it with the value, by **Polygon**, connected **Mesh** or **UV Island**. Rectangles pick polygons they touch (**Intersect**) or whose center is inside (**Center**), visible ones only unless you turn that off. Ctrl clears, Esc or right-click finishes, each fill is one undo step.
-6. **Selections** keeps selections for later: **+** adds the current one to the list, clicking an item selects it again (Shift+click adds to the current selection). Tick several and **Combine** them as a union, intersection or subtraction.
+   - **Randomize** writes random values between **Min** and **Max**, one per vertex, polygon, connected element or selected edge. Its options also hold a fixed seed and **Smooth Polygons**, which lets face selections fade into their neighbors.
+   - **By Edge Angle** selects convex edges (ridges), concave edges (valleys) or both within an angle range, as edges, vertices or faces. Fill them for edge wear or corner dirt.
+   - **Selections** keeps selections for later: **+** adds the current one, clicking an item selects it again (Shift+click adds to the current selection). Tick several and **Combine** them as a union, intersection or subtraction.
 
 Everything is stored on the mesh, so it's saved with the .blend and shared by linked duplicates. The layers and saved selections are hidden attributes that FBX doesn't export. Adding, removing and reordering layers happens in Object Mode, where undo covers both the list and the data.
 
-**Blend materials.** **Create Blend Material** replaces the active material with one that blends LiveMat materials by the mask: a **Base** plus one material per channel. They're mixed property by property (color, metallic, roughness, normal, height, alpha, emission) under one Principled BSDF, as engine shaders do. With **Height Blend** on, a layer comes in where its mask is high and its height map shapes the edge: a layer with mask m and height h gets the weight `clamp((m + (h - 0.5) * influence - (0.5 - t / 2)) / t, 0, 1)`, where t is **Transition** and influence is **Height Influence**. Off, the weight is simply m. **Refresh** rebuilds Blend materials after their sources change.
+#### Mask Blend
 
-**Pixel masks.** Set a Blend material's **Mask** to **Textures** to use one grayscale image per channel, through the UVs, instead of vertex colors. The R, G, B, A buttons open Texture Paint on that channel's image; **Done** packs the painting into the .blend. **Vertex Colors to Textures** bakes the vertex mask into the images, **Textures to Vertex Colors** samples them back into new Fill layers.
+The Blend material reads a **Packed Mask**: R, G and B are the layer masks and A is ambient occlusion, all on the **UV Map** you pick. A **Macro Normal** on the same UVs, the object's unique baked normal map, is combined with the layers' tiling normals.
 
-**Mask textures.** **Export Mask Textures** saves the mask as 8-bit PNG or TGA in the layout of the workflow you pick, and the panel shows the import settings it needs:
+- **New** makes an empty mask at the chosen resolution: no layers and no occlusion.
+- The **R**, **G**, **B**, **AO** buttons open Texture Paint on that channel, in grayscale. White applies it, black removes it. **Done** writes it back into the packed mask, which is saved inside the .blend.
+- **Bake from Vertex Blend** bakes the vertex mask into the packed mask through the UVs, so you can block out with Polygon Fill and Generators and refine with brushes.
+
+A mask painted in Substance Painter works as is: load it in **Packed Mask** with the same UVs.
+
+#### Export
+
+**Vertex colors.** Unity and Unreal read only the first color set of an FBX, and LiveMat stores the mask so Blender's default FBX settings deliver the exact values (a value of 0.5 arrives as 128/255). The **Export** section warns when another color attribute would be exported first and fixes it with **Export the Mask First**, which keeps that attribute's data. **Check FBX Export** exports the object to a temporary file, reads it back and confirms the engine gets the same values.
+
+**Mask textures.** **Export Mask Texture** saves the mask, from either mode, as 8-bit PNG or TGA in the layout you pick in its options, which also show the import settings it needs:
 
 | Layout | Files |
 |---|---|
-| Generic RGBA | One RGBA image |
+| Rust Packed Mask | One RGBA mask: R, G, B layers, A ambient occlusion |
 | Unity HDRP LayeredLit | One RGBA layer mask: R, G, B drive layers 1 to 3, A the main layer |
-| Unity Terrain Splatmap | One RGBA splatmap, weights normalized to add up to 1 |
+| Unity Terrain Splatmap | Base, R, G and B as four terrain layer weights that add up to 1 |
 | Unreal (Packed RGBA) | One RGBA image, imported with Masks compression |
-| Unreal Landscape Layers | One grayscale image per channel |
+| Unreal Landscape Layers | One grayscale weight image each for Base, R, G and B |
 | Godot | One RGBA image, imported Lossless |
-
-**Vertex color export.** Unity and Unreal read only the first color set of an FBX, and LiveMat stores the mask so Blender's default FBX settings deliver the exact values (a value of 0.5 arrives as 128/255). The **Export** section warns when another color attribute would be exported first and fixes it with **Export the Mask First**, which keeps that attribute's data. **Check FBX Export** exports the object to a temporary file, reads it back and confirms the engine gets the same values.
 
 ### Normal maps and tangents
 

@@ -3,7 +3,7 @@
 
 import bmesh
 import bpy
-from bpy.props import BoolProperty, EnumProperty, IntProperty
+from bpy.props import BoolProperty, EnumProperty, IntProperty, StringProperty
 
 from . import data, export, fill, generators, paint, props, selection
 
@@ -418,8 +418,8 @@ class LIVEMAT_OT_blend_material_create(_MeshOperator, bpy.types.Operator):
     def execute(self, context):
         from . import material
 
-        created = material.create(context.object)
-        self.report({"INFO"}, f"Created {created.name}. Pick a material for each channel")
+        created = material.create(context.object, context.scene.livemat_blend_tool.mode)
+        self.report({"INFO"}, f"Created {created.name}. Pick a material for R, G and B")
         return {"FINISHED"}
 
 
@@ -445,7 +445,7 @@ class LIVEMAT_OT_blend_material_rebuild(bpy.types.Operator):
         return {"FINISHED"}
 
 
-# Pixel masks
+# Blend mode and Mask Blend
 
 
 def _blend_material(context):
@@ -454,6 +454,32 @@ def _blend_material(context):
     obj = context.object
     mat = obj.active_material if obj is not None else None
     return mat if mat is not None and mat.get(material.TAG) else None
+
+
+class LIVEMAT_OT_blend_mode(_MeshOperator, bpy.types.Operator):
+    bl_idname = "livemat.blend_mode"
+    bl_label = "Blend Mode"
+    bl_description = "Switch between blending by vertex colors and by a packed mask texture"
+
+    mode: EnumProperty(items=props.BLEND_MODES, options={"SKIP_SAVE"})
+
+    @classmethod
+    def description(cls, _context, properties):
+        return next(item[2] for item in props.BLEND_MODES if item[0] == properties.mode)
+
+    def execute(self, context):
+        context.scene.livemat_blend_tool.mode = self.mode
+        material = _blend_material(context)
+        if material is not None:
+            setup = material.livemat_blend_material
+            if setup.painting:
+                from . import texture
+
+                if context.mode == "PAINT_TEXTURE":
+                    bpy.ops.object.mode_set(mode="OBJECT")
+                texture.paint_finish(material)
+            setup.mask_source = self.mode
+        return {"FINISHED"}
 
 
 class _MaskOperator:
@@ -467,10 +493,24 @@ class _MaskOperator:
         return True
 
 
+class LIVEMAT_OT_blend_mask_new(_MaskOperator, bpy.types.Operator):
+    bl_idname = "livemat.blend_mask_new"
+    bl_label = "New Mask"
+    bl_description = "Create an empty packed mask: no layers, full ambient occlusion"
+
+    def execute(self, context):
+        from . import texture
+
+        material = _blend_material(context)
+        material.livemat_blend_material.mask_image = None
+        texture.packed_image(material, create=True)
+        return {"FINISHED"}
+
+
 class LIVEMAT_OT_blend_mask_paint(_MaskOperator, bpy.types.Operator):
     bl_idname = "livemat.blend_mask_paint"
-    bl_label = "Paint Mask Texture"
-    bl_description = "Paint this channel's mask texture with Blender's texture paint brushes"
+    bl_label = "Paint Mask Channel"
+    bl_description = "Paint this channel of the packed mask with Blender's texture paint brushes. White applies it, black removes it"
 
     channel: EnumProperty(items=[(c, c, "") for c in data.CHANNELS], options={"SKIP_SAVE"})
 
@@ -478,79 +518,63 @@ class LIVEMAT_OT_blend_mask_paint(_MaskOperator, bpy.types.Operator):
         from . import texture
 
         material = _blend_material(context)
-        setup = material.livemat_blend_material
-        image = texture.channel_image(material, self.channel, create=True)
-        if setup.mask_source != "TEXTURE":
-            setup.mask_source = "TEXTURE"  # rebuilds with an image node per channel
-        if context.mode != "PAINT_TEXTURE":
-            bpy.ops.object.mode_set(mode="TEXTURE_PAINT")
-        context.scene.tool_settings.image_paint.mode = "MATERIAL"
-        images = list(material.texture_paint_images)
-        if image in images:
-            material.paint_active_slot = images.index(image)
-        self.report({"INFO"}, f"Painting mask {self.channel}: white applies the channel, black removes it")
+        if material.livemat_blend_material.painting and context.mode == "PAINT_TEXTURE":
+            bpy.ops.object.mode_set(mode="OBJECT")
+        texture.paint_start(context, material, self.channel)
         return {"FINISHED"}
 
 
 class LIVEMAT_OT_blend_mask_done(_MaskOperator, bpy.types.Operator):
     bl_idname = "livemat.blend_mask_done"
     bl_label = "Done"
-    bl_description = "Keep the painted mask textures in the .blend and go back to Object Mode"
+    bl_description = "Write the painted channel into the packed mask and go back to Object Mode"
+
+    @classmethod
+    def poll(cls, context):
+        material = _blend_material(context)
+        return material is not None and bool(material.livemat_blend_material.painting)
 
     def execute(self, context):
+        from . import texture
+
         if context.mode == "PAINT_TEXTURE":
             bpy.ops.object.mode_set(mode="OBJECT")
-        material = _blend_material(context)
-        for channel in data.CHANNELS:
-            image = getattr(material.livemat_blend_material, f"image_{channel.lower()}")
-            if image is not None and image.is_dirty:
-                image.pack()  # unsaved paint would be lost on reload
+        texture.paint_finish(_blend_material(context))
         return {"FINISHED"}
 
 
-class LIVEMAT_OT_blend_mask_convert(_MaskOperator, bpy.types.Operator):
-    bl_idname = "livemat.blend_mask_convert"
-    bl_label = "Convert Mask"
-    bl_description = "Copy the mask between vertex colors and textures"
-
-    direction: EnumProperty(
-        items=[
-            ("TO_TEXTURE", "Vertex Colors to Textures", "Bake the vertex mask into the mask textures, through the UVs"),
-            ("TO_VERTEX", "Textures to Vertex Colors", "Sample the mask textures at each corner into new Fill layers"),
-        ],
-        options={"SKIP_SAVE"},
-    )
-
-    @classmethod
-    def description(cls, _context, properties):
-        return {
-            "TO_TEXTURE": "Bake the vertex mask into the mask textures, through the UVs",
-            "TO_VERTEX": "Sample the mask textures at each corner into new Fill layers",
-        }[properties.direction]
+class LIVEMAT_OT_blend_mask_from_vertex(_MaskOperator, bpy.types.Operator):
+    bl_idname = "livemat.blend_mask_from_vertex"
+    bl_label = "Bake from Vertex Blend"
+    bl_description = "Bake this mesh's vertex mask into the packed mask texture, through the UVs"
 
     def execute(self, context):
         from . import generators, texture
 
         material = _blend_material(context)
         try:
-            if self.direction == "TO_TEXTURE":
-                done = texture.from_vertex(context, material, context.object)
-                material.livemat_blend_material.mask_source = "TEXTURE"
-            else:
-                done = texture.to_vertex(material, context.object)
-                material.livemat_blend_material.mask_source = "VERTEX"
+            texture.from_vertex(context, material, context.object)
         except (generators.BakeError, TypeError, RuntimeError) as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
-        self.report({"INFO"}, f"Converted channels {', '.join(done) or 'none'}")
+        material.livemat_blend_material.mask_source = "TEXTURE"
+        context.scene.livemat_blend_tool.mode = "TEXTURE"
         return {"FINISHED"}
 
 
 class LIVEMAT_OT_blend_mask_export(_MaskOperator, bpy.types.Operator):
     bl_idname = "livemat.blend_mask_export"
-    bl_label = "Export Mask Textures"
+    bl_label = "Export Mask Texture"
     bl_description = "Save the mask as image files in the layout the chosen engine workflow expects"
     bl_options = {"REGISTER"}
+
+    directory: StringProperty(subtype="DIR_PATH", options={"SKIP_SAVE", "HIDDEN"})
+
+    def invoke(self, context, _event):
+        if context.scene.livemat_blend_tool.export_folder:
+            return self.execute(context)
+        context.window_manager.fileselect_add(self)  # first export: ask where
+        return {"RUNNING_MODAL"}
 
     def execute(self, context):
         import os
@@ -558,19 +582,23 @@ class LIVEMAT_OT_blend_mask_export(_MaskOperator, bpy.types.Operator):
         from . import generators, texture
 
         tool = context.scene.livemat_blend_tool
+        if self.directory:
+            tool.export_folder = self.directory
         if not tool.export_folder:
             self.report({"ERROR"}, "Pick a folder to export to")
             return {"CANCELLED"}
         folder = bpy.path.abspath(tool.export_folder)
         material = _blend_material(context)
+        setup = material.livemat_blend_material
         try:
-            arrays = None
-            if material.livemat_blend_material.mask_source == "VERTEX":
-                # Bake on the fly: painted mask images (if any) stay as they are.
-                arrays = texture.bake_vertex(context, material, context.object)
-            paths = texture.export(
-                material, folder, bpy.path.clean_name(material.name), tool.export_preset, tool.export_format, arrays
-            )
+            if setup.mask_source == "VERTEX":
+                rgba = texture.bake_vertex(context, material, context.object)  # leaves any packed mask alone
+            elif setup.mask_image is not None:
+                rgba = texture.read_rgba(setup.mask_image)
+            else:
+                self.report({"ERROR"}, "Create or pick a packed mask first")
+                return {"CANCELLED"}
+            paths = texture.export(rgba, folder, bpy.path.clean_name(material.name), tool.export_preset, tool.export_format)
         except (generators.BakeError, OSError, RuntimeError, TypeError) as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
@@ -630,9 +658,11 @@ register, unregister = bpy.utils.register_classes_factory(
         LIVEMAT_OT_blend_view,
         LIVEMAT_OT_blend_material_create,
         LIVEMAT_OT_blend_material_rebuild,
+        LIVEMAT_OT_blend_mode,
+        LIVEMAT_OT_blend_mask_new,
         LIVEMAT_OT_blend_mask_paint,
         LIVEMAT_OT_blend_mask_done,
-        LIVEMAT_OT_blend_mask_convert,
+        LIVEMAT_OT_blend_mask_from_vertex,
         LIVEMAT_OT_blend_mask_export,
         LIVEMAT_OT_blend_move_first,
         LIVEMAT_OT_blend_check,

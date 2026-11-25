@@ -16,13 +16,24 @@ from bpy.props import (
 from .. import icons
 from . import composite, data
 
+BLEND_MODES = [
+    ("VERTEX", "Vertex Blend", "Blend by the mesh's vertex colors: R, G, B pick the layers, A is ambient occlusion", "VPAINT_HLT", 0),
+    ("TEXTURE", "Mask Blend", "Blend by a packed RGBA mask texture on the UVs: R, G, B pick the layers, A is ambient occlusion", "TPAINT_HLT", 1),
+]
+
+
 _channel_items = []  # kept alive: Blender doesn't copy enum item strings
 
 
 def _channels(_self, _context):
-    names = {"R": "Red", "G": "Green", "B": "Blue", "A": "Alpha"}
+    tips = {
+        "R": "Red: mask of the R layer",
+        "G": "Green: mask of the G layer, over R",
+        "B": "Blue: mask of the B layer, over R and G",
+        "A": "Alpha: ambient occlusion (1 is unoccluded)",
+    }
     _channel_items[:] = [
-        (key, key, f"Work on the {names[key].lower()} channel", icons.get(f"channel_{key.lower()}"), number)
+        (key, "AO" if key == "A" else key, tips[key], icons.get(f"channel_{key.lower()}"), number)
         for number, key in enumerate(data.CHANNELS)
     ]
     return _channel_items
@@ -128,7 +139,7 @@ class LiveMatBlendMesh(bpy.types.PropertyGroup):
         size=4,
         min=0.0,
         max=1.0,
-        default=(0.0, 0.0, 0.0, 0.0),
+        default=(0.0, 0.0, 0.0, 1.0),  # A is AO: unoccluded until a layer says otherwise
         description="Value of each channel where no layer covers it",
         update=_recomposite,
     )
@@ -200,6 +211,7 @@ class LiveMatBlendTool(bpy.types.PropertyGroup):
         default="INTERSECT",
     )
     visible_only: BoolProperty(name="Visible Only", default=True, description="A rectangle skips polygons hidden behind others")
+    mode: EnumProperty(name="Blend Mode", items=BLEND_MODES, default="VERTEX", description="Blend mode for new Blend materials")
     export_preset: EnumProperty(name="Layout", items=lambda self, context: _export_presets(), default=0)
     export_format: EnumProperty(
         name="Format", items=[("PNG", "PNG", "8-bit PNG"), ("TARGA", "TGA", "8-bit TGA")], default="PNG"
@@ -233,45 +245,60 @@ def _source(name, description):
     return PointerProperty(type=bpy.types.Material, name=name, description=description, poll=_source_poll, update=_rebuild_material)
 
 
-class LiveMatBlendMaterial(bpy.types.PropertyGroup):
-    """A Blend material: a base material with others blended over it by the mask channels."""
 
-    base: _source("Base", "Material underneath everything")
-    layer_r: _source("R", "Material shown where the red channel is high")
-    layer_g: _source("G", "Material shown where the green channel is high")
-    layer_b: _source("B", "Material shown where the blue channel is high")
-    layer_a: _source("A", "Material shown where the alpha channel is high")
+
+def _factor(channel):
+    return FloatProperty(
+        name="Factor", default=0.5, min=0.0, max=1.0, subtype="FACTOR", update=_rebuild_material,
+        description=f"How much the {channel} layer's height map moves its edge (0: the mask alone decides)",
+    )
+
+
+def _falloff(channel):
+    return FloatProperty(
+        name="Falloff", default=0.2, min=0.01, max=1.0, subtype="FACTOR", update=_rebuild_material,
+        description=f"How soft the edge of the {channel} layer is",
+    )
+
+
+class LiveMatBlendMaterial(bpy.types.PropertyGroup):
+    """A Blend material: Base, then R, G and B layers on top, with A as ambient occlusion."""
+
+    base: _source("Base", "Always on, underneath the layers")
+    layer_r: _source("R", "Shown where the red channel is high")
+    layer_g: _source("G", "Shown where the green channel is high, over R")
+    layer_b: _source("B", "Shown where the blue channel is high, over R and G")
+    factor_r: _factor("R")
+    factor_g: _factor("G")
+    factor_b: _factor("B")
+    falloff_r: _falloff("R")
+    falloff_g: _falloff("G")
+    falloff_b: _falloff("B")
     use_height: BoolProperty(
         name="Height Blend", default=True, update=_rebuild_material,
         description="Use each layer's height map to shape where it comes in. Off: plain linear blend by the mask",
     )
-    height_influence: FloatProperty(
-        name="Height Influence", default=0.5, min=0.0, max=1.0, subtype="FACTOR", update=_rebuild_material,
-        description="How much the height map moves the edge of a layer",
+    ao_strength: FloatProperty(
+        name="AO", default=1.0, min=0.0, max=1.0, subtype="FACTOR", update=_rebuild_material,
+        description="How much the alpha channel's ambient occlusion darkens the result",
     )
-    transition: FloatProperty(
-        name="Transition", default=0.2, min=0.01, max=1.0, subtype="FACTOR", update=_rebuild_material,
-        description="How soft the edge between layers is",
+    mask_source: EnumProperty(name="Blend Mode", items=BLEND_MODES, default="VERTEX", update=_rebuild_material)
+    mask_image: PointerProperty(
+        type=bpy.types.Image, name="Packed Mask", update=_rebuild_material,
+        description="RGBA mask texture: R, G, B layer masks, A ambient occlusion. Import with sRGB off",
     )
-    mask_source: EnumProperty(
-        name="Mask",
-        items=[
-            ("VERTEX", "Vertex Colors", "Read the mask from the Blend vertex colors", "VPAINT_HLT", 0),
-            ("TEXTURE", "Textures", "Read the mask from one painted image per channel, through the UVs", "TPAINT_HLT", 1),
-        ],
-        default="VERTEX",
-        update=_rebuild_material,
+    macro_normal: PointerProperty(
+        type=bpy.types.Image, name="Macro Normal", update=_rebuild_material,
+        description="Baked normal map on the same UVs as the mask, combined with the layers' tiling normals",
     )
+    uv_map: StringProperty(name="UV Map", update=_rebuild_material, description="UV map of the mask and macro normal. Empty: the render UV map")
     resolution: EnumProperty(
         name="Resolution",
         items=[(str(s), f"{s} px", f"{s} by {s} pixels") for s in (512, 1024, 2048, 4096)],
         default="2048",
-        description="Size of new mask images and of exported masks",
+        description="Size of a new packed mask",
     )
-    image_r: PointerProperty(type=bpy.types.Image, update=_rebuild_material)
-    image_g: PointerProperty(type=bpy.types.Image, update=_rebuild_material)
-    image_b: PointerProperty(type=bpy.types.Image, update=_rebuild_material)
-    image_a: PointerProperty(type=bpy.types.Image, update=_rebuild_material)
+    painting: StringProperty()  # channel being painted in Texture Paint, empty otherwise
 
 
 _classes = (LiveMatBlendLayer, LiveMatSelectionSet, LiveMatBlendMesh, LiveMatBlendTool, LiveMatBlendMaterial)
