@@ -456,10 +456,12 @@ def _blend_material(context):
     return mat if mat is not None and mat.get(material.TAG) else None
 
 
-class LIVEMAT_OT_blend_mode(_MeshOperator, bpy.types.Operator):
+class LIVEMAT_OT_blend_mode(bpy.types.Operator):
     bl_idname = "livemat.blend_mode"
     bl_label = "Blend Mode"
     bl_description = "Switch between blending by vertex colors and by a packed mask texture"
+
+    bl_options = {"REGISTER", "UNDO"}
 
     mode: EnumProperty(items=props.BLEND_MODES, options={"SKIP_SAVE"})
 
@@ -469,7 +471,7 @@ class LIVEMAT_OT_blend_mode(_MeshOperator, bpy.types.Operator):
 
     def execute(self, context):
         context.scene.livemat_blend_tool.mode = self.mode
-        material = _blend_material(context)
+        material = _blend_material(context) if _mesh(context) is not None else None
         if material is not None:
             setup = material.livemat_blend_material
             if setup.painting:

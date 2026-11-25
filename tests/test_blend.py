@@ -746,6 +746,10 @@ class PixelMaskTest(BlendMaterialTest):
         self.assertEqual(bpy.ops.livemat.blend_mode(mode="VERTEX"), {"FINISHED"})
         self.assertEqual(blend.livemat_blend_material.mask_source, "VERTEX")
         self.assertEqual(tool.mode, "VERTEX")
+        bpy.context.view_layer.objects.active = None  # the switch works with nothing selected too
+        self.assertEqual(bpy.ops.livemat.blend_mode(mode="TEXTURE"), {"FINISHED"})
+        self.assertEqual(tool.mode, "TEXTURE")
+        tool.mode = "VERTEX"
 
     def test_export_layouts(self):
         import os

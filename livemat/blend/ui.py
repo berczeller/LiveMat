@@ -356,10 +356,11 @@ def _draw_export(layout, mesh, material, mode, tool, section, end_section):
 def draw(layout, context, section, end_section):
     """Draw the Blend tab with the shared section helpers from the main UI."""
     obj = context.object
-    if obj is None or obj.type != "MESH":
-        _hint(layout, "Select a mesh to blend materials on it")
-        return
     tool = context.scene.livemat_blend_tool
+    if obj is None or obj.type != "MESH":
+        _draw_switch(layout, tool.mode)
+        _hint(layout, "Select a mesh")
+        return
     material = _blend_material(obj)
     mode = material.livemat_blend_material.mask_source if material is not None else tool.mode
 
